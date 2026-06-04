@@ -1,254 +1,395 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Upload, Search, Hand, Pencil, Trash2, Undo2, Download, Save, Sparkles,
-  Layers, ZoomIn, ZoomOut, Image as ImageIcon, ArrowRight, Check, FileDown,
+  Upload, Search, Pencil, Trash2, Undo2, Download, Save, Sparkles,
+  Layers, ZoomIn, ZoomOut, ArrowRight, Check, FileDown, KeyRound, Image as ImageIcon,
 } from "lucide-react";
+import { toast } from "sonner";
+import mapboxgl from "mapbox-gl";
+import MapboxDraw from "@mapbox/mapbox-gl-draw";
+import turfArea from "@turf/area";
+import turfCentroid from "@turf/centroid";
+import "mapbox-gl/dist/mapbox-gl.css";
+import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 import { AppShell, Panel, PageHeader, BrandButton, Input } from "@/components/AppShell";
-import satellite from "@/assets/satellite.jpg";
 
 export const Route = createFileRoute("/talhoes")({
   head: () => ({ meta: [{ title: "Talhões — Orion AgTech" }] }),
   component: TalhoesPage,
 });
 
-type Pt = { x: number; y: number };
-type Polygon = { id: string; name: string; color: string; points: Pt[]; cultura?: string };
+type Plot = {
+  id: string;
+  name: string;
+  color: string;
+  cultura?: string;
+  hectares: number;
+  feature: GeoJSON.Feature<GeoJSON.Polygon>;
+};
 
 const COLORS = ["#E6641F", "#4ADE80", "#60A5FA", "#FBBF24", "#A78BFA", "#F472B6"];
-const VW = 1000;
-const VH = 560;
+const DEFAULT_CENTER: [number, number] = [-49.9509, -22.2118]; // Marília, SP
+const STYLES = {
+  satellite: "mapbox://styles/mapbox/satellite-streets-v12",
+  streets: "mapbox://styles/mapbox/streets-v12",
+  outdoors: "mapbox://styles/mapbox/outdoors-v12",
+} as const;
+type StyleKey = keyof typeof STYLES;
 
-/** Area in viewbox units → estimated hectares (calibrated so a ~22% area ≈ 140ha). */
-function polygonAreaHa(points: Pt[]) {
-  if (points.length < 3) return 0;
-  let a = 0;
-  for (let i = 0; i < points.length; i++) {
-    const p1 = points[i];
-    const p2 = points[(i + 1) % points.length];
-    a += p1.x * p2.y - p2.x * p1.y;
-  }
-  const px = Math.abs(a / 2);
-  const totalPx = VW * VH;
-  const totalHectares = 600;
-  return (px / totalPx) * totalHectares;
+const ENV_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string | undefined) ?? "";
+
+/* ─────────────────────────── Sample polygons (auto detect) ─────────────────────────── */
+function sampleFeatures(center: [number, number]): GeoJSON.Feature<GeoJSON.Polygon>[] {
+  const [lng, lat] = center;
+  // ~0.01 deg ≈ 1.1 km
+  const offsets: Array<{ name: string; cultura: string; box: [number, number, number, number] }> = [
+    { name: "Talhão A", cultura: "Soja RR",            box: [lng - 0.014, lat - 0.004, lng - 0.002, lat + 0.008] },
+    { name: "Talhão B", cultura: "Milho Híbrido",      box: [lng + 0.0,    lat - 0.006, lng + 0.012, lat + 0.006] },
+    { name: "Talhão C", cultura: "Soja Convencional", box: [lng + 0.014,  lat - 0.010, lng + 0.026, lat + 0.004] },
+  ];
+  return offsets.map((o, i) => {
+    const [w, s, e, n] = o.box;
+    return {
+      type: "Feature",
+      properties: { name: o.name, cultura: o.cultura, color: COLORS[i % COLORS.length] },
+      geometry: { type: "Polygon", coordinates: [[[w, s],[e, s],[e, n],[w, n],[w, s]]] },
+    };
+  });
 }
 
-const sample: Polygon[] = [
-  { id: "A", name: "Talhão A", color: "#4ADE80", cultura: "Soja RR",
-    points: [{x:80,y:90},{x:330,y:60},{x:380,y:240},{x:260,y:340},{x:90,y:300}] },
-  { id: "B", name: "Talhão B", color: "#FBBF24", cultura: "Milho Híbrido",
-    points: [{x:430,y:80},{x:660,y:110},{x:710,y:300},{x:520,y:340},{x:420,y:240}] },
-  { id: "C", name: "Talhão C", color: "#60A5FA", cultura: "Soja Convencional",
-    points: [{x:740,y:140},{x:930,y:170},{x:920,y:420},{x:770,y:470},{x:700,y:340}] },
-];
+/* ─────────────────────────── KML / CSV parsers ─────────────────────────── */
+function parseKml(text: string): GeoJSON.Feature<GeoJSON.Polygon>[] {
+  const doc = new DOMParser().parseFromString(text, "text/xml");
+  const polys = Array.from(doc.getElementsByTagName("Polygon"));
+  return polys.map((poly, i) => {
+    const placemark = poly.closest("Placemark");
+    const name = placemark?.getElementsByTagName("name")[0]?.textContent?.trim() || `Talhão ${String.fromCharCode(65 + i)}`;
+    const coordsNode = poly.getElementsByTagName("coordinates")[0];
+    if (!coordsNode) return null;
+    const coords = coordsNode.textContent!.trim().split(/\s+/).map((s) => {
+      const [lon, lat] = s.split(",").map(Number);
+      return [lon, lat] as [number, number];
+    }).filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+    if (coords.length < 3) return null;
+    return {
+      type: "Feature",
+      properties: { name, color: COLORS[i % COLORS.length] },
+      geometry: { type: "Polygon", coordinates: [coords] },
+    } as GeoJSON.Feature<GeoJSON.Polygon>;
+  }).filter(Boolean) as GeoJSON.Feature<GeoJSON.Polygon>[];
+}
 
+function parseCsv(text: string): GeoJSON.Feature<GeoJSON.Polygon>[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const grouped = new Map<string, [number, number][]>();
+  const startIdx = /[a-z]/i.test(lines[0]) ? 1 : 0;
+  for (let i = startIdx; i < lines.length; i++) {
+    const parts = lines[i].split(/[,;]/).map((p) => p.trim());
+    if (parts.length < 3) continue;
+    const name = parts[0];
+    const lon = Number(parts[1]); const lat = Number(parts[2]);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+    if (!grouped.has(name)) grouped.set(name, []);
+    grouped.get(name)!.push([lon, lat]);
+  }
+  return Array.from(grouped.entries()).map(([name, coords], i) => ({
+    type: "Feature",
+    properties: { name, color: COLORS[i % COLORS.length] },
+    geometry: { type: "Polygon", coordinates: [[...coords, coords[0]]] },
+  } as GeoJSON.Feature<GeoJSON.Polygon>));
+}
+
+function toKml(plots: Plot[]) {
+  const placemarks = plots.map((p) => {
+    const coords = (p.feature.geometry.coordinates[0] as [number, number][])
+      .map(([lon, lat]) => `${lon},${lat},0`).join(" ");
+    return `<Placemark><name>${p.name}</name><description>${p.cultura ?? ""} · ${p.hectares.toFixed(1)} ha</description><Polygon><outerBoundaryIs><LinearRing><coordinates>${coords}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Orion AgTech — Talhões</name>${placemarks}</Document></kml>`;
+}
+
+function toGeoJson(plots: Plot[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: plots.map((p) => ({
+      ...p.feature,
+      properties: { name: p.name, cultura: p.cultura ?? null, color: p.color, hectares: +p.hectares.toFixed(2) },
+    })),
+  };
+}
+
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ─────────────────────────── Component ─────────────────────────── */
 function TalhoesPage() {
-  const [polygons, setPolygons] = useState<Polygon[]>([]);
-  const [mode, setMode] = useState<"view" | "draw">("view");
-  const [drawing, setDrawing] = useState<Pt[]>([]);
-  const [hover, setHover] = useState<Pt | null>(null);
+  const [token, setToken] = useState<string>(() => ENV_TOKEN || (typeof window !== "undefined" ? localStorage.getItem("orion_mapbox_token") ?? "" : ""));
+  const [tokenInput, setTokenInput] = useState("");
+  const [plots, setPlots] = useState<Plot[]>([]);
   const [tab, setTab] = useState<"Manual" | "KML" | "Automático">("Automático");
   const [autoRunning, setAutoRunning] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  const [bgImage, setBgImage] = useState<string>(satellite);
+  const [styleKey, setStyleKey] = useState<StyleKey>("satellite");
+  const [search, setSearch] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-  const imageRef = useRef<HTMLInputElement>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
+  const mapEl = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const drawRef = useRef<MapboxDraw | null>(null);
+  const labelMarkers = useRef<mapboxgl.Marker[]>([]);
 
+  /* ── Build a Plot from a raw GeoJSON polygon ── */
+  const buildPlot = (feat: GeoJSON.Feature<GeoJSON.Polygon>, idx: number): Plot => {
+    const haRaw = turfArea(feat as any) / 10000;
+    const props = (feat.properties ?? {}) as any;
+    return {
+      id: (feat.id as string) ?? crypto.randomUUID(),
+      name: props.name ?? `Talhão ${String.fromCharCode(65 + idx)}`,
+      cultura: props.cultura ?? undefined,
+      color: props.color ?? COLORS[idx % COLORS.length],
+      hectares: haRaw,
+      feature: feat,
+    };
+  };
+
+  /* ── Initialize map ── */
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2500);
-    return () => clearTimeout(t);
-  }, [toast]);
-
-  const totalHa = useMemo(
-    () => polygons.reduce((s, p) => s + polygonAreaHa(p.points), 0),
-    [polygons]
-  );
-
-  const toSvgPoint = (e: React.MouseEvent): Pt => {
-    const svg = svgRef.current!;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const ctm = svg.getScreenCTM()!.inverse();
-    const r = pt.matrixTransform(ctm);
-    return { x: r.x, y: r.y };
-  };
-
-  const handleSvgClick = (e: React.MouseEvent) => {
-    if (mode !== "draw") return;
-    setDrawing((d) => [...d, toSvgPoint(e)]);
-  };
-
-  const handleSvgMove = (e: React.MouseEvent) => {
-    if (mode !== "draw") return;
-    setHover(toSvgPoint(e));
-  };
-
-  const finishDrawing = () => {
-    if (drawing.length < 3) {
-      setToast("Adicione ao menos 3 pontos.");
+    if (!token || !mapEl.current || mapRef.current) return;
+    mapboxgl.accessToken = token;
+    let map: mapboxgl.Map;
+    try {
+      map = new mapboxgl.Map({
+        container: mapEl.current,
+        style: STYLES[styleKey],
+        center: DEFAULT_CENTER,
+        zoom: 13.5,
+        pitch: 0,
+        attributionControl: false,
+      });
+    } catch (e: any) {
+      toast.error("Falha ao iniciar o Mapbox.", { description: e?.message ?? "" });
       return;
     }
-    const idx = polygons.length;
-    const letter = String.fromCharCode(65 + idx);
-    setPolygons((p) => [
-      ...p,
-      { id: crypto.randomUUID(), name: `Talhão ${letter}`, color: COLORS[idx % COLORS.length], points: drawing },
-    ]);
-    setDrawing([]);
-    setHover(null);
-    setMode("view");
-    setToast(`Talhão ${letter} demarcado manualmente.`);
+    mapRef.current = map;
+
+    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "top-right");
+    map.addControl(new mapboxgl.ScaleControl({ unit: "metric" }), "bottom-left");
+    map.addControl(new mapboxgl.AttributionControl({ compact: true }));
+
+    const draw = new MapboxDraw({
+      displayControlsDefault: false,
+      controls: { polygon: false, trash: false },
+      defaultMode: "simple_select",
+      styles: drawStyles(),
+    });
+    drawRef.current = draw;
+    map.addControl(draw as any);
+
+    const refresh = () => {
+      const fc = draw.getAll();
+      const next: Plot[] = fc.features
+        .filter((f): f is GeoJSON.Feature<GeoJSON.Polygon> => f.geometry?.type === "Polygon")
+        .map((f, i) => buildPlot(f, i));
+      setPlots(next);
+    };
+    map.on("draw.create", refresh);
+    map.on("draw.update", refresh);
+    map.on("draw.delete", refresh);
+
+    map.on("error", (ev: any) => {
+      const m = ev?.error?.message ?? "";
+      if (m.toLowerCase().includes("unauthorized") || m.toLowerCase().includes("invalid")) {
+        toast.error("Token Mapbox inválido.", { description: "Verifique e tente novamente." });
+        setToken("");
+        try { localStorage.removeItem("orion_mapbox_token"); } catch {}
+      }
+    });
+
+    return () => {
+      labelMarkers.current.forEach((m) => m.remove());
+      labelMarkers.current = [];
+      map.remove();
+      mapRef.current = null;
+      drawRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  /* ── React to style changes ── */
+  useEffect(() => {
+    const m = mapRef.current; if (!m) return;
+    m.setStyle(STYLES[styleKey]);
+  }, [styleKey]);
+
+  /* ── Render area labels as markers (independent of style reloads) ── */
+  useEffect(() => {
+    const m = mapRef.current; if (!m) return;
+    labelMarkers.current.forEach((mk) => mk.remove());
+    labelMarkers.current = plots.map((p) => {
+      const c = turfCentroid(p.feature as any).geometry.coordinates as [number, number];
+      const el = document.createElement("div");
+      el.style.cssText = "background:rgba(0,0,0,0.75);border:1px solid " + p.color + ";color:#fff;font:600 11px Inter,sans-serif;padding:3px 7px;border-radius:6px;white-space:nowrap;pointer-events:none;";
+      el.innerHTML = `${p.name} · <span style="color:${p.color}">${p.hectares.toFixed(1)} ha</span>`;
+      return new mapboxgl.Marker({ element: el }).setLngLat(c).addTo(m);
+    });
+  }, [plots]);
+
+  /* ── Helpers ── */
+  const totalHa = useMemo(() => plots.reduce((s, p) => s + p.hectares, 0), [plots]);
+
+  const startDrawing = () => {
+    const d = drawRef.current; if (!d) return;
+    d.changeMode("draw_polygon" as any);
+    toast.message("Demarcação manual ativa", { description: "Clique no mapa para adicionar pontos. Duplo clique para finalizar." });
   };
 
-  const undoPoint = () => setDrawing((d) => d.slice(0, -1));
-  const cancelDrawing = () => { setDrawing([]); setHover(null); setMode("view"); };
+  const undoPoint = () => {
+    // Mapbox Draw does not expose an undo; cancel current draw and let user restart.
+    const d = drawRef.current; if (!d) return;
+    d.changeMode("simple_select");
+    toast.message("Demarcação cancelada.");
+  };
 
   const clearAll = () => {
-    if (polygons.length === 0 && drawing.length === 0) return;
-    setPolygons([]); setDrawing([]); setHover(null);
-    setToast("Demarcações apagadas.");
+    const d = drawRef.current; if (!d) return;
+    if (plots.length === 0) return;
+    d.deleteAll();
+    setPlots([]);
+    toast.success("Demarcações apagadas.");
   };
 
   const runAutoDetect = () => {
+    const m = mapRef.current, d = drawRef.current; if (!m || !d) return;
     setAutoRunning(true);
     setTimeout(() => {
-      setPolygons(sample);
+      const center = m.getCenter().toArray() as [number, number];
+      const feats = sampleFeatures(center);
+      d.deleteAll();
+      feats.forEach((f) => d.add(f));
+      const fc = d.getAll();
+      const next = fc.features.map((f, i) => {
+        const merged = { ...f, properties: { ...(f.properties ?? {}), ...feats[i]?.properties } } as GeoJSON.Feature<GeoJSON.Polygon>;
+        return buildPlot(merged, i);
+      });
+      setPlots(next);
       setAutoRunning(false);
-      setToast("3 talhões detectados automaticamente.");
-    }, 1400);
+      const b = new mapboxgl.LngLatBounds();
+      feats.forEach((f) => (f.geometry.coordinates[0] as [number, number][]).forEach((c) => b.extend(c)));
+      m.fitBounds(b, { padding: 60, duration: 800 });
+      toast.success(`${feats.length} talhões detectados.`);
+    }, 1100);
   };
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
+    const f = e.target.files?.[0]; if (!f) return;
     setFileName(f.name);
     const ext = f.name.split(".").pop()?.toLowerCase();
     try {
-      if (["jpg","jpeg","png","webp"].includes(ext ?? "")) {
-        const url = URL.createObjectURL(f);
-        setBgImage(url);
-        setToast(`Imagem "${f.name}" carregada como mapa base.`);
-      } else if (ext === "kml") {
-        const text = await f.text();
-        const polys = parseKml(text);
-        if (polys.length === 0) throw new Error("Nenhum polígono encontrado no KML.");
-        setPolygons(polys);
-        setToast(`KML importado: ${polys.length} talhão(ões).`);
-      } else if (ext === "csv") {
-        const text = await f.text();
-        const polys = parseCsv(text);
-        if (polys.length === 0) throw new Error("CSV sem coordenadas válidas.");
-        setPolygons(polys);
-        setToast(`CSV importado: ${polys.length} talhão(ões).`);
+      let feats: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
+      if (ext === "kml") feats = parseKml(await f.text());
+      else if (ext === "csv") feats = parseCsv(await f.text());
+      else if (ext === "geojson" || ext === "json") {
+        const data = JSON.parse(await f.text()) as GeoJSON.FeatureCollection;
+        feats = (data.features ?? []).filter((x): x is GeoJSON.Feature<GeoJSON.Polygon> => x.geometry?.type === "Polygon");
       } else {
-        setToast("Formato não suportado. Use .kml, .csv, .jpg ou .png.");
+        toast.error("Use arquivos .kml, .csv ou .geojson.");
+        return;
       }
+      if (feats.length === 0) throw new Error("Nenhum polígono encontrado no arquivo.");
+      const d = drawRef.current, m = mapRef.current; if (!d || !m) return;
+      d.deleteAll();
+      feats.forEach((ft, i) => d.add({ ...ft, properties: { ...(ft.properties ?? {}), color: COLORS[i % COLORS.length] } }));
+      const next = d.getAll().features.map((ft, i) => buildPlot({ ...ft, properties: { ...(ft.properties ?? {}), ...feats[i]?.properties } } as GeoJSON.Feature<GeoJSON.Polygon>, i));
+      setPlots(next);
+      const b = new mapboxgl.LngLatBounds();
+      feats.forEach((ft) => (ft.geometry.coordinates[0] as [number, number][]).forEach((c) => b.extend(c)));
+      m.fitBounds(b, { padding: 60, duration: 800 });
+      toast.success(`${feats.length} talhão(ões) importado(s).`);
     } catch (err: any) {
-      setToast(err.message ?? "Falha ao importar arquivo.");
+      toast.error(err.message ?? "Falha ao importar arquivo.");
     }
     e.target.value = "";
   };
 
-  const onImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const url = URL.createObjectURL(f);
-    setBgImage(url);
-    setToast(`Imagem "${f.name}" carregada como mapa base.`);
-    e.target.value = "";
+  /* ── Search via Mapbox Geocoding API ── */
+  const doSearch = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!search.trim() || !token || !mapRef.current) return;
+    try {
+      const r = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(search)}.json?access_token=${token}&limit=1`);
+      const data = await r.json();
+      const f = data.features?.[0];
+      if (!f) { toast.error("Local não encontrado."); return; }
+      mapRef.current.flyTo({ center: f.center as [number, number], zoom: 14, essential: true });
+      toast.success(`Centralizado em ${f.place_name}`);
+    } catch {
+      toast.error("Falha na busca.");
+    }
   };
 
-  const downloadBlob = (blob: Blob, name: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = name; a.click();
-    URL.revokeObjectURL(url);
-  };
-
+  /* ── Exports ── */
   const exportKml = () => {
-    const kml = polygonsToKml(polygons);
-    downloadBlob(new Blob([kml], { type: "application/vnd.google-earth.kml+xml" }), "talhoes.kml");
-    setToast("KML exportado.");
+    if (plots.length === 0) return toast.error("Nenhum talhão para exportar.");
+    downloadBlob(new Blob([toKml(plots)], { type: "application/vnd.google-earth.kml+xml" }), "talhoes.kml");
+    toast.success("KML exportado.");
   };
-
   const exportGeoJson = () => {
-    const gj = polygonsToGeoJson(polygons);
-    downloadBlob(new Blob([JSON.stringify(gj, null, 2)], { type: "application/geo+json" }), "talhoes.geojson");
-    setToast("GeoJSON exportado.");
+    if (plots.length === 0) return toast.error("Nenhum talhão para exportar.");
+    downloadBlob(new Blob([JSON.stringify(toGeoJson(plots), null, 2)], { type: "application/geo+json" }), "talhoes.geojson");
+    toast.success("GeoJSON exportado.");
+  };
+  const exportImage = () => {
+    const m = mapRef.current; if (!m) return;
+    m.once("render", () => {
+      m.getCanvas().toBlob((b) => {
+        if (b) { downloadBlob(b, "mapa-talhoes.png"); toast.success("Imagem do mapa baixada."); }
+        else toast.error("Falha ao gerar imagem.");
+      });
+    });
+    m.triggerRepaint();
   };
 
-  const exportImage = async () => {
-    const canvas = document.createElement("canvas");
-    canvas.width = VW; canvas.height = VH;
-    const ctx = canvas.getContext("2d")!;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = bgImage;
-    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(); });
-    ctx.drawImage(img, 0, 0, VW, VH);
-    for (const p of polygons) {
-      ctx.beginPath();
-      p.points.forEach((pt, i) => (i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y)));
-      ctx.closePath();
-      ctx.fillStyle = p.color + "55";
-      ctx.strokeStyle = p.color;
-      ctx.lineWidth = 3;
-      ctx.fill();
-      ctx.stroke();
-      // label
-      const c = centroid(p.points);
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
-      const label = `${p.name} · ${polygonAreaHa(p.points).toFixed(0)} ha`;
-      ctx.font = "600 18px Inter, sans-serif";
-      const w = ctx.measureText(label).width + 16;
-      ctx.fillRect(c.x - w / 2, c.y - 14, w, 28);
-      ctx.fillStyle = "#fff";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(label, c.x, c.y);
+  const saveToken = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tokenInput.trim().startsWith("pk.")) {
+      toast.error("Token inválido. Use um Access Token público (pk.…) do Mapbox.");
+      return;
     }
-    canvas.toBlob((b) => { if (b) downloadBlob(b, "talhoes.png"); setToast("Imagem baixada."); }, "image/png");
+    try { localStorage.setItem("orion_mapbox_token", tokenInput.trim()); } catch {}
+    setToken(tokenInput.trim());
+    toast.success("Mapbox conectado.");
   };
 
+  /* ── Render ── */
   return (
     <AppShell>
       <PageHeader
         title="Demarcação de Fazenda e Talhões"
-        subtitle="Importe um arquivo ou trace manualmente o contorno da fazenda para o sistema cadastrar automaticamente."
+        subtitle="Mapa de satélite Mapbox · Importe, detecte ou desenhe seus talhões e exporte."
       />
 
       <div className="grid grid-cols-[420px_1fr] gap-5">
-        {/* LEFT — upload + mode */}
+        {/* LEFT */}
         <Panel className="p-5">
-          <h3 className="text-[13px] font-semibold text-white">Upload de arquivo ou imagem</h3>
-          <p className="mt-1 text-[11.5px] text-muted-foreground">CSV, KML ou imagem (JPG/PNG) da sua área.</p>
+          <h3 className="text-[13px] font-semibold text-white">Upload de arquivo geoespacial</h3>
+          <p className="mt-1 text-[11.5px] text-muted-foreground">CSV, KML ou GeoJSON exportado do Google Earth / John Deere / FieldView.</p>
 
           <div className="mt-4 rounded-xl border border-dashed border-border bg-panel-2 p-5 text-center">
-            <Upload size={28} className="mx-auto text-muted-foreground" />
+            <Upload size={26} className="mx-auto text-muted-foreground" />
             <p className="mt-2 text-[12px] text-muted-foreground">
-              {fileName ? <span className="text-foreground">{fileName}</span> : "Arraste o arquivo ou selecione manualmente"}
+              {fileName ? <span className="text-foreground">{fileName}</span> : "Selecione um .kml, .csv ou .geojson"}
             </p>
-            <input ref={fileRef} type="file" accept=".kml,.csv,.jpg,.jpeg,.png,.webp,image/*" hidden onChange={onFile} />
-            <input ref={imageRef} type="file" accept="image/*" hidden onChange={onImage} />
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <BrandButton className="w-full" onClick={() => fileRef.current?.click()}>Selecionar arquivo</BrandButton>
-              <button onClick={() => imageRef.current?.click()}
-                className="rounded-lg border border-border bg-panel px-3 py-2 text-[12.5px] font-medium text-foreground hover:bg-[#2a2a2a]">
-                <span className="inline-flex items-center justify-center gap-1.5"><ImageIcon size={13}/> Imagem</span>
-              </button>
-            </div>
+            <input ref={fileRef} type="file" accept=".kml,.csv,.geojson,.json" hidden onChange={onFile} />
+            <BrandButton className="mt-3 w-full" onClick={() => fileRef.current?.click()}>Selecionar arquivo</BrandButton>
           </div>
-
 
           <div className="mt-6 mb-3 text-center text-[11px] uppercase tracking-wider text-muted-foreground">Demarcação de Contorno</div>
 
           <div className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-panel-2 p-1">
-            {(["Manual","KML","Automático"] as const).map((t) => (
+            {(["Manual", "KML", "Automático"] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`rounded-md py-1.5 text-[12px] transition ${tab === t ? "bg-brand text-brand-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                 {t}
@@ -262,11 +403,11 @@ function TalhoesPage() {
                 <Sparkles size={14} /> Detecção automática
               </div>
               <ul className="space-y-1.5 text-[12px] text-foreground">
-                <li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#4ADE80]"/>Análise NDVI da última imagem</li>
-                <li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#4ADE80]"/>Detecção de bordas e divisão de talhões</li>
-                <li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#4ADE80]"/>Cálculo automático de hectares</li>
+                <li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#4ADE80]" />Análise NDVI da última imagem</li>
+                <li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#4ADE80]" />Detecção de bordas e divisão de talhões</li>
+                <li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#4ADE80]" />Cálculo automático de hectares</li>
               </ul>
-              <BrandButton className="mt-4 w-full" disabled={autoRunning} onClick={runAutoDetect}>
+              <BrandButton className="mt-4 w-full" disabled={autoRunning || !token} onClick={runAutoDetect}>
                 {autoRunning ? "Detectando talhões..." : "Detectar talhões automaticamente"}
               </BrandButton>
             </div>
@@ -274,122 +415,88 @@ function TalhoesPage() {
 
           {tab === "Manual" && (
             <div className="mt-4 rounded-xl border border-border bg-panel-2 p-4 text-[12px] text-muted-foreground">
-              <p className="mb-3 text-foreground">Use o lápis na barra do mapa para clicar e demarcar o contorno do talhão. Clique em <span className="text-brand">Concluir</span> para fechar o polígono.</p>
-              <button onClick={() => setMode("draw")}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a]">
-                <Pencil size={14}/> Iniciar demarcação manual
+              <p className="mb-3 text-foreground">Use o lápis para clicar e demarcar o contorno do talhão. Duplo-clique para fechar o polígono.</p>
+              <button onClick={startDrawing} disabled={!token}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a] disabled:opacity-40">
+                <Pencil size={14} /> Iniciar demarcação manual
               </button>
             </div>
           )}
 
           {tab === "KML" && (
             <div className="mt-4 rounded-xl border border-border bg-panel-2 p-4 text-[12px] text-muted-foreground">
-              Selecione um arquivo .kml exportado do Google Earth, John Deere Operations Center ou Climate FieldView. Os polígonos serão importados automaticamente.
+              Selecione um arquivo .kml exportado do Google Earth, John Deere Operations Center ou Climate FieldView. Os polígonos serão georreferenciados automaticamente.
             </div>
           )}
         </Panel>
 
-        {/* RIGHT — map / drawing */}
+        {/* RIGHT */}
         <Panel className="p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="relative flex-1 max-w-md">
+            <form onSubmit={doSearch} className="relative flex-1 max-w-md">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Buscar talhão ou coordenada..." className="w-full pl-8" />
-            </div>
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar endereço, cidade ou coordenada..." className="w-full pl-8" />
+            </form>
             <div className="flex items-center gap-1.5">
-              <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Layers size={14}/></button>
-              <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><ZoomIn size={14}/></button>
-              <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><ZoomOut size={14}/></button>
+              <button onClick={() => { const next: StyleKey = styleKey === "satellite" ? "streets" : styleKey === "streets" ? "outdoors" : "satellite"; setStyleKey(next); toast.message(`Camada: ${next}`); }}
+                title="Trocar camada"
+                className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Layers size={14} /></button>
+              <button onClick={() => mapRef.current?.zoomIn()} className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><ZoomIn size={14} /></button>
+              <button onClick={() => mapRef.current?.zoomOut()} className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><ZoomOut size={14} /></button>
             </div>
           </div>
 
-          {/* Map */}
-          <div className="relative overflow-hidden rounded-xl border border-border bg-panel-2">
-            <svg
-              ref={svgRef}
-              viewBox={`0 0 ${VW} ${VH}`}
-              className={`block w-full ${mode === "draw" ? "cursor-crosshair" : "cursor-default"}`}
-              onClick={handleSvgClick}
-              onMouseMove={handleSvgMove}
-              onMouseLeave={() => setHover(null)}
-            >
-              <image href={bgImage} x={0} y={0} width={VW} height={VH} preserveAspectRatio="xMidYMid slice" />
-              <rect x={0} y={0} width={VW} height={VH} fill="rgba(0,0,0,0.25)" />
-
-              {polygons.map((p) => {
-                const c = centroid(p.points);
-                const area = polygonAreaHa(p.points);
-                return (
-                  <g key={p.id}>
-                    <polygon
-                      points={p.points.map((pt) => `${pt.x},${pt.y}`).join(" ")}
-                      fill={p.color + "44"}
-                      stroke={p.color}
-                      strokeWidth={2.5}
-                    />
-                    <g transform={`translate(${c.x}, ${c.y})`}>
-                      <rect x={-70} y={-16} width={140} height={32} rx={6} fill="rgba(0,0,0,0.7)" />
-                      <text textAnchor="middle" y={-2} fill="#fff" fontSize={12} fontWeight={600} fontFamily="Inter">{p.name}</text>
-                      <text textAnchor="middle" y={12} fill={p.color} fontSize={11} fontFamily="Inter">{area.toFixed(0)} ha · {p.cultura ?? "Sem cultura"}</text>
-                    </g>
-                  </g>
-                );
-              })}
-
-              {/* In-progress polygon */}
-              {drawing.length > 0 && (
-                <g>
-                  <polyline
-                    points={[...drawing, hover ?? drawing[drawing.length - 1]].map((pt) => `${pt.x},${pt.y}`).join(" ")}
-                    fill="rgba(230,100,31,0.18)"
-                    stroke="#E6641F"
-                    strokeWidth={2}
-                    strokeDasharray="6 4"
+          {/* Map container */}
+          <div className="relative h-[560px] overflow-hidden rounded-xl border border-border bg-panel-2">
+            {token ? (
+              <div ref={mapEl} className="absolute inset-0" />
+            ) : (
+              <div className="absolute inset-0 grid place-items-center p-8">
+                <form onSubmit={saveToken} className="w-full max-w-md rounded-xl border border-border bg-panel p-6 text-center">
+                  <KeyRound className="mx-auto text-brand" size={26} />
+                  <h3 className="mt-3 text-[15px] font-semibold text-white">Conectar Mapbox</h3>
+                  <p className="mt-1 text-[12px] text-muted-foreground">
+                    Cole seu Access Token público (<code className="text-brand">pk.…</code>) do Mapbox para carregar imagens de satélite e desenhar talhões.
+                  </p>
+                  <input
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    placeholder="pk.eyJ1Ijoi..."
+                    className="mt-4 h-10 w-full rounded-md border border-border bg-panel-2 px-3 text-[12.5px] text-foreground outline-none focus:border-brand"
                   />
-                  {drawing.map((pt, i) => (
-                    <circle key={i} cx={pt.x} cy={pt.y} r={5} fill="#E6641F" stroke="#fff" strokeWidth={1.5} />
-                  ))}
-                </g>
-              )}
-            </svg>
-
-            {/* Map overlay status */}
-            {mode === "draw" && (
-              <div className="absolute left-3 top-3 rounded-md border border-brand/50 bg-black/60 px-2.5 py-1 text-[11px] text-brand">
-                Modo demarcação · {drawing.length} ponto(s)
+                  <BrandButton type="submit" className="mt-3 w-full">Conectar</BrandButton>
+                  <p className="mt-3 text-[11px] text-muted-foreground">
+                    O token fica salvo apenas no seu navegador. Pegue em{" "}
+                    <a href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noreferrer" className="text-brand hover:underline">account.mapbox.com</a>.
+                  </p>
+                </form>
               </div>
             )}
+
             {autoRunning && (
               <div className="absolute inset-0 grid place-items-center bg-black/50">
                 <div className="flex gap-1.5">
-                  {[0,1,2,3,4].map((i) => (
-                    <span key={i} className="h-2.5 w-2.5 rounded-full bg-brand" style={{ opacity: 0.3 + ((i % 3) * 0.25), animation: `pulse 1s ${i*0.1}s infinite` }} />
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <span key={i} className="h-2.5 w-2.5 rounded-full bg-brand" style={{ animation: `pulse 1s ${i * 0.1}s infinite` }} />
                   ))}
                 </div>
               </div>
             )}
           </div>
 
-          {/* Map toolbar */}
+          {/* Toolbar */}
           <div className="mt-3 flex items-center justify-between rounded-xl border border-border bg-panel-2 px-3 py-2">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Demarcação de Contorno</div>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Ferramentas do Mapa</div>
             <div className="flex items-center gap-1.5">
-              <Tool icon={Hand}    label="Mover"    active={mode==="view"}   onClick={() => { cancelDrawing(); setMode("view"); }} />
-              <Tool icon={Pencil}  label="Desenhar" active={mode==="draw"}   onClick={() => setMode("draw")} brand />
-              <Tool icon={Undo2}   label="Desfazer" onClick={undoPoint}   disabled={mode!=="draw" || drawing.length===0} />
-              <Tool icon={Trash2}  label="Limpar"   onClick={clearAll} />
-              <Tool icon={ImageIcon} label="Baixar imagem" onClick={exportImage} disabled={polygons.length===0} />
-              <span className="mx-1 h-5 w-px bg-border"/>
-              {mode === "draw" ? (
-                <button onClick={finishDrawing} className="rounded-md bg-brand px-3 py-1.5 text-[12px] font-medium text-brand-foreground">
-                  <span className="inline-flex items-center gap-1.5"><Save size={13}/> Concluir</span>
-                </button>
-              ) : (
-                <button onClick={() => setToast("Demarcações salvas no projeto.")} disabled={polygons.length===0}
-                  className="rounded-md bg-brand px-3 py-1.5 text-[12px] font-medium text-brand-foreground disabled:opacity-40">
-                  <span className="inline-flex items-center gap-1.5"><Save size={13}/> Salvar</span>
-                </button>
-              )}
+              <Tool icon={Pencil} label="Desenhar" brand onClick={startDrawing} disabled={!token} />
+              <Tool icon={Undo2} label="Cancelar desenho" onClick={undoPoint} disabled={!token} />
+              <Tool icon={Trash2} label="Limpar" onClick={clearAll} disabled={plots.length === 0} />
+              <Tool icon={ImageIcon} label="Baixar imagem" onClick={exportImage} disabled={!token} />
+              <span className="mx-1 h-5 w-px bg-border" />
+              <button onClick={() => toast.success("Demarcações salvas no projeto.")} disabled={plots.length === 0}
+                className="rounded-md bg-brand px-3 py-1.5 text-[12px] font-medium text-brand-foreground disabled:opacity-40">
+                <span className="inline-flex items-center gap-1.5"><Save size={13} /> Salvar</span>
+              </button>
             </div>
           </div>
 
@@ -397,23 +504,26 @@ function TalhoesPage() {
           <div className="mt-4">
             <div className="mb-2 flex items-center justify-between">
               <h4 className="text-[12px] font-semibold text-white">Talhões identificados</h4>
-              <span className="text-[11px] text-muted-foreground">Total: {totalHa.toFixed(0)} ha · {polygons.length} talhão(ões)</span>
+              <span className="text-[11px] text-muted-foreground">Total: {totalHa.toFixed(1)} ha · {plots.length} talhão(ões)</span>
             </div>
-            {polygons.length === 0 ? (
+            {plots.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border bg-panel-2 p-5 text-center text-[12px] text-muted-foreground">
-                Nenhum talhão demarcado ainda. Use a detecção automática, importe um KML ou desenhe manualmente no mapa.
+                Nenhum talhão demarcado. Use a detecção automática, importe um KML/GeoJSON ou desenhe manualmente no mapa.
               </div>
             ) : (
               <div className="grid grid-cols-3 gap-3">
-                {polygons.map((p) => (
-                  <div key={p.id} className="rounded-lg border border-border bg-panel-2 p-3">
+                {plots.map((p) => (
+                  <button key={p.id} onClick={() => {
+                    const c = turfCentroid(p.feature as any).geometry.coordinates as [number, number];
+                    mapRef.current?.flyTo({ center: c, zoom: 15.5, essential: true });
+                  }} className="rounded-lg border border-border bg-panel-2 p-3 text-left hover:border-brand/60">
                     <div className="flex items-center gap-2">
                       <span className="h-2.5 w-2.5 rounded-full" style={{ background: p.color }} />
                       <span className="text-[13px] font-semibold text-white">{p.name}</span>
                     </div>
-                    <div className="mt-2 text-[22px] font-semibold text-white">{polygonAreaHa(p.points).toFixed(0)} ha</div>
+                    <div className="mt-2 text-[22px] font-semibold text-white">{p.hectares.toFixed(1)} ha</div>
                     <div className="text-[11px] text-muted-foreground">{p.cultura ?? "Sem cultura"}</div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -423,44 +533,38 @@ function TalhoesPage() {
 
       {/* Bottom bar */}
       <div className="mt-5 flex items-center justify-between rounded-xl border border-border bg-panel p-4">
-        <div className="text-[12px] text-muted-foreground">
-          Fazenda São Lucas · Marília, SP · Safra 2025/26
-        </div>
+        <div className="text-[12px] text-muted-foreground">Fazenda São Lucas · Marília, SP · Safra 2025/26</div>
         <div className="flex items-center gap-2">
-          <button onClick={exportKml} disabled={polygons.length===0}
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a] disabled:opacity-40">
-            <FileDown size={14}/> Exportar KML
+          <button onClick={exportKml} disabled={plots.length === 0} className="flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a] disabled:opacity-40">
+            <FileDown size={14} /> Exportar KML
           </button>
-          <button onClick={exportGeoJson} disabled={polygons.length===0}
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a] disabled:opacity-40">
-            <Download size={14}/> Exportar GeoJSON
+          <button onClick={exportGeoJson} disabled={plots.length === 0} className="flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a] disabled:opacity-40">
+            <Download size={14} /> Exportar GeoJSON
           </button>
-          <BrandButton disabled={polygons.length===0}>
-            <span className="inline-flex items-center gap-1.5">Confirmar e avançar <ArrowRight size={14}/></span>
+          <BrandButton disabled={plots.length === 0} onClick={() => toast.success(`${plots.length} talhões confirmados.`, { description: `Total: ${totalHa.toFixed(1)} ha` })}>
+            <span className="inline-flex items-center gap-1.5">Confirmar e avançar <ArrowRight size={14} /></span>
           </BrandButton>
         </div>
       </div>
 
-      {toast && (
-        <div className="fixed bottom-16 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-brand/40 bg-panel px-4 py-2 text-[12.5px] text-foreground shadow-lg">
-          {toast}
-        </div>
-      )}
-
-      <style>{`@keyframes pulse { 0%,100% { transform: scale(1); opacity: 0.4 } 50% { transform: scale(1.4); opacity: 1 } }`}</style>
+      <style>{`
+        @keyframes pulse { 0%,100% { transform: scale(1); opacity: 0.4 } 50% { transform: scale(1.4); opacity: 1 } }
+        .mapboxgl-ctrl-attrib, .mapboxgl-ctrl-logo { opacity: 0.6 }
+        .mapboxgl-ctrl-group { background: #1a1a1a !important; border: 1px solid #2e2e2e !important; }
+        .mapboxgl-ctrl-group button { filter: invert(0.9); }
+      `}</style>
     </AppShell>
   );
 }
 
-function Tool({ icon: Icon, label, active, brand, disabled, onClick }: { icon: any; label: string; active?: boolean; brand?: boolean; disabled?: boolean; onClick?: () => void }) {
+/* ─────────────────────────── Toolbar button ─────────────────────────── */
+function Tool({ icon: Icon, label, brand, disabled, onClick }: { icon: any; label: string; brand?: boolean; disabled?: boolean; onClick?: () => void }) {
   const base = "grid h-8 w-8 place-items-center rounded-md border transition";
   const cls = disabled
     ? "border-border bg-panel text-muted-foreground/40 cursor-not-allowed"
-    : active && brand
-    ? "border-brand bg-brand text-brand-foreground"
-    : active
-    ? "border-brand/50 bg-[rgba(230,100,31,0.15)] text-brand"
-    : "border-border bg-panel text-muted-foreground hover:text-foreground";
+    : brand
+      ? "border-brand bg-brand text-brand-foreground"
+      : "border-border bg-panel text-muted-foreground hover:text-foreground";
   return (
     <button onClick={onClick} disabled={disabled} title={label} className={`${base} ${cls}`}>
       <Icon size={14} />
@@ -468,109 +572,14 @@ function Tool({ icon: Icon, label, active, brand, disabled, onClick }: { icon: a
   );
 }
 
-function centroid(pts: Pt[]): Pt {
-  const x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-  const y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-  return { x, y };
-}
-
-/** Very small KML polygon parser: extracts <coordinates> within <Polygon>. Maps lat/lng to viewbox. */
-function parseKml(text: string): Polygon[] {
-  const doc = new DOMParser().parseFromString(text, "text/xml");
-  const polys = Array.from(doc.getElementsByTagName("Polygon"));
-  if (polys.length === 0) return [];
-  const all: { name: string; coords: { lon: number; lat: number }[] }[] = [];
-  polys.forEach((poly, i) => {
-    const placemark = poly.closest("Placemark");
-    const name = placemark?.getElementsByTagName("name")[0]?.textContent?.trim() || `Talhão ${String.fromCharCode(65 + i)}`;
-    const coordsNode = poly.getElementsByTagName("coordinates")[0];
-    if (!coordsNode) return;
-    const coords = coordsNode.textContent!.trim().split(/\s+/).map((s) => {
-      const [lon, lat] = s.split(",").map(Number);
-      return { lon, lat };
-    }).filter((c) => Number.isFinite(c.lon) && Number.isFinite(c.lat));
-    if (coords.length >= 3) all.push({ name, coords });
-  });
-  if (all.length === 0) return [];
-  const lons = all.flatMap((p) => p.coords.map((c) => c.lon));
-  const lats = all.flatMap((p) => p.coords.map((c) => c.lat));
-  const minLon = Math.min(...lons), maxLon = Math.max(...lons);
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-  const pad = 40;
-  const project = (lon: number, lat: number): Pt => ({
-    x: pad + ((lon - minLon) / (maxLon - minLon || 1)) * (VW - pad * 2),
-    y: pad + (1 - (lat - minLat) / (maxLat - minLat || 1)) * (VH - pad * 2),
-  });
-  return all.map((p, i) => ({
-    id: crypto.randomUUID(),
-    name: p.name,
-    color: COLORS[i % COLORS.length],
-    points: p.coords.map((c) => project(c.lon, c.lat)),
-  }));
-}
-
-/** CSV format: name,lon,lat (one point per line; new polygon when name changes). */
-function parseCsv(text: string): Polygon[] {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 3) return [];
-  const grouped = new Map<string, { lon: number; lat: number }[]>();
-  const startIdx = /[a-z]/i.test(lines[0]) ? 1 : 0;
-  for (let i = startIdx; i < lines.length; i++) {
-    const parts = lines[i].split(/[,;]/).map((p) => p.trim());
-    if (parts.length < 3) continue;
-    const name = parts[0];
-    const lon = Number(parts[1]);
-    const lat = Number(parts[2]);
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-    if (!grouped.has(name)) grouped.set(name, []);
-    grouped.get(name)!.push({ lon, lat });
-  }
-  const all = Array.from(grouped.entries()).map(([name, coords]) => ({ name, coords }));
-  if (all.length === 0) return [];
-  const lons = all.flatMap((p) => p.coords.map((c) => c.lon));
-  const lats = all.flatMap((p) => p.coords.map((c) => c.lat));
-  const minLon = Math.min(...lons), maxLon = Math.max(...lons);
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-  const pad = 40;
-  return all.map((p, i) => ({
-    id: crypto.randomUUID(),
-    name: p.name,
-    color: COLORS[i % COLORS.length],
-    points: p.coords.map((c) => ({
-      x: pad + ((c.lon - minLon) / (maxLon - minLon || 1)) * (VW - pad * 2),
-      y: pad + (1 - (c.lat - minLat) / (maxLat - minLat || 1)) * (VH - pad * 2),
-    })),
-  }));
-}
-
-function polygonsToKml(polys: Polygon[]) {
-  // Project viewbox back to a placeholder coord around -22, -49 (interior SP).
-  const baseLon = -49.95, baseLat = -22.21, span = 0.05;
-  const back = (p: Pt) => [baseLon + (p.x / VW) * span, baseLat + (1 - p.y / VH) * span];
-  const placemarks = polys.map((p) => `
-    <Placemark>
-      <name>${p.name}</name>
-      <Polygon><outerBoundaryIs><LinearRing><coordinates>
-        ${p.points.map(back).map(([lon, lat]) => `${lon},${lat},0`).join(" ")}
-        ${(() => { const [lon, lat] = back(p.points[0]); return `${lon},${lat},0`; })()}
-      </coordinates></LinearRing></outerBoundaryIs></Polygon>
-    </Placemark>`).join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Orion AgTech — Talhões</name>${placemarks}</Document></kml>`;
-}
-
-function polygonsToGeoJson(polys: Polygon[]) {
-  const baseLon = -49.95, baseLat = -22.21, span = 0.05;
-  const back = (p: Pt) => [baseLon + (p.x / VW) * span, baseLat + (1 - p.y / VH) * span];
-  return {
-    type: "FeatureCollection",
-    features: polys.map((p) => ({
-      type: "Feature",
-      properties: { name: p.name, color: p.color, cultura: p.cultura ?? null, hectares: +polygonAreaHa(p.points).toFixed(1) },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[...p.points.map(back), back(p.points[0])]],
-      },
-    })),
-  };
+/* ─────────────────────────── Mapbox Draw custom styling ─────────────────────────── */
+function drawStyles() {
+  const brand = "#E6641F";
+  return [
+    { id: "gl-draw-polygon-fill", type: "fill", filter: ["all", ["==", "$type", "Polygon"]], paint: { "fill-color": brand, "fill-opacity": 0.18 } },
+    { id: "gl-draw-polygon-stroke", type: "line", filter: ["all", ["==", "$type", "Polygon"]], paint: { "line-color": brand, "line-width": 2.5 } },
+    { id: "gl-draw-polygon-and-line-vertex-halo-active", type: "circle", filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]], paint: { "circle-radius": 6, "circle-color": "#fff" } },
+    { id: "gl-draw-polygon-and-line-vertex-active", type: "circle", filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]], paint: { "circle-radius": 4, "circle-color": brand } },
+    { id: "gl-draw-line-active", type: "line", filter: ["all", ["==", "$type", "LineString"], ["==", "active", "true"]], paint: { "line-color": brand, "line-dasharray": [0.2, 2], "line-width": 2 } },
+  ] as any[];
 }
