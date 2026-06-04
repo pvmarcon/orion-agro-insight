@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, Search, Mail, Phone } from "lucide-react";
+import { Plus, Search, Mail } from "lucide-react";
 import { AppShell, Kpi, Panel, StatusBadge, PageHeader, Input, BrandButton, Progress } from "@/components/AppShell";
 
 export const Route = createFileRoute("/equipe")({
