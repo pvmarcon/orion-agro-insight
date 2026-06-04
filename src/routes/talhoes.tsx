@@ -270,7 +270,7 @@ function TalhoesPage() {
       d.deleteAll();
       feats.forEach((f) => d.add(f));
       const fc = d.getAll();
-      const next = fc.features.map((f, i) => {
+      const next = (fc.features as GeoJSON.Feature[]).map((f: GeoJSON.Feature, i: number) => {
         const merged = { ...f, properties: { ...(f.properties ?? {}), ...feats[i]?.properties } } as GeoJSON.Feature<GeoJSON.Polygon>;
         return buildPlot(merged, i);
       });
@@ -302,7 +302,7 @@ function TalhoesPage() {
       const d = drawRef.current, m = mapRef.current; if (!d || !m) return;
       d.deleteAll();
       feats.forEach((ft, i) => d.add({ ...ft, properties: { ...(ft.properties ?? {}), color: COLORS[i % COLORS.length] } }));
-      const next = d.getAll().features.map((ft, i) => buildPlot({ ...ft, properties: { ...(ft.properties ?? {}), ...feats[i]?.properties } } as GeoJSON.Feature<GeoJSON.Polygon>, i));
+      const next = (d.getAll().features as GeoJSON.Feature[]).map((ft: GeoJSON.Feature, i: number) => buildPlot({ ...ft, properties: { ...(ft.properties ?? {}), ...feats[i]?.properties } } as GeoJSON.Feature<GeoJSON.Polygon>, i));
       setPlots(next);
       const b = new mapboxgl.LngLatBounds();
       feats.forEach((ft) => (ft.geometry.coordinates[0] as [number, number][]).forEach((c) => b.extend(c)));
