@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { Plus, Search, Mail } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell, Kpi, Panel, StatusBadge, PageHeader, Input, BrandButton, Progress } from "@/components/AppShell";
 
 export const Route = createFileRoute("/equipe")({
@@ -22,12 +24,14 @@ const initials = (n: string) => n.split(" ").slice(0, 2).map((p) => p[0]).join("
 const palette = ["#E6641F", "#4ADE80", "#60A5FA", "#FBBF24", "#A78BFA", "#F472B6", "#22D3EE", "#FB923C"];
 
 function EquipePage() {
+  const [query, setQuery] = useState("");
+  const filtered = team.filter((m) => !query || m.n.toLowerCase().includes(query.toLowerCase()) || m.r.toLowerCase().includes(query.toLowerCase()));
   return (
     <AppShell>
       <PageHeader
         title="Equipe & Colaboradores"
         subtitle="Quadro de funcionários, escalas e produtividade"
-        actions={<BrandButton><span className="inline-flex items-center gap-1.5"><Plus size={14} /> Novo colaborador</span></BrandButton>}
+        actions={<BrandButton onClick={() => toast.success("Formulário de novo colaborador aberto.")}><span className="inline-flex items-center gap-1.5"><Plus size={14} /> Novo colaborador</span></BrandButton>}
       />
 
       <div className="grid grid-cols-4 gap-4">
@@ -43,7 +47,7 @@ function EquipePage() {
             <h2 className="text-[14px] font-semibold text-white">Quadro de Colaboradores</h2>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Buscar colaborador..." className="w-64 pl-8" />
+              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar colaborador..." className="w-64 pl-8" />
             </div>
           </div>
 
@@ -61,7 +65,10 @@ function EquipePage() {
               </tr>
             </thead>
             <tbody>
-              {team.map((m, i) => (
+              {filtered.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-[12px] text-muted-foreground">Nenhum colaborador encontrado.</td></tr>}
+              {filtered.map((m) => {
+                const i = team.indexOf(m);
+                return (
                 <tr key={m.n} className="border-t border-border">
                   <td className="py-3">
                     <div className="flex items-center gap-2.5">
@@ -76,10 +83,10 @@ function EquipePage() {
                   <td className="w-36"><Progress value={m.hrs} tone={m.ht as any} /></td>
                   <td className="text-muted-foreground">{m.c}</td>
                   <td className="text-right">
-                    <button className="rounded-md border border-border bg-panel-2 px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground">Perfil</button>
+                    <button onClick={() => toast.message(m.n, { description: `${m.r} · ${m.t} · ${m.c}` })} className="rounded-md border border-border bg-panel-2 px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground">Perfil</button>
                   </td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
         </Panel>
@@ -122,7 +129,7 @@ function EquipePage() {
                     <p className="text-white">{a.n}</p>
                     <p className="text-[11px] text-muted-foreground">{a.d}</p>
                   </div>
-                  <button className="grid h-7 w-7 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground"><Mail size={12}/></button>
+                  <button onClick={() => toast.success(`Mensagem de aniversário enviada para ${a.n}.`)} className="grid h-7 w-7 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Mail size={12}/></button>
                 </li>
               ))}
             </ul>

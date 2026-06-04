@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Download } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell, Kpi, Panel, PageHeader } from "@/components/AppShell";
 
 export const Route = createFileRoute("/analises")({
@@ -29,7 +30,14 @@ function AnalisesPage() {
         title="Análises Financeiras"
         subtitle="Desempenho da safra 2025/26 — Fazenda São Lucas"
         actions={
-          <button className="flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a]">
+          <button onClick={() => {
+            const body = `Orion AgTech — Análises Financeiras\nReceita acumulada: R$ 1,42M\nCusto operacional: R$ 918K\nMargem líquida: 35,3%\nROI/ha: R$ 1.840\n\nReceita (12m): ${receita.join(", ")}\nCusto (12m):   ${custo.join(", ")}\n`;
+            const blob = new Blob([body], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a"); a.href = url; a.download = "analises-orion.txt"; a.click();
+            URL.revokeObjectURL(url);
+            toast.success("Relatório exportado.");
+          }} className="flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a]">
             <Download size={14}/> Exportar PDF
           </button>
         }
