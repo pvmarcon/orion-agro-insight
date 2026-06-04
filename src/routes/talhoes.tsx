@@ -52,7 +52,9 @@ function TalhoesPage() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [bgImage, setBgImage] = useState<string>(satellite);
   const fileRef = useRef<HTMLInputElement>(null);
+  const imageRef = useRef<HTMLInputElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
