@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TalhoesRouteImport } from './routes/talhoes'
 import { Route as NotasRouteImport } from './routes/notas'
 import { Route as MaquinarioRouteImport } from './routes/maquinario'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as InsumosRouteImport } from './routes/insumos'
 import { Route as FinanciamentosRouteImport } from './routes/financiamentos'
 import { Route as EquipeRouteImport } from './routes/equipe'
@@ -33,6 +34,11 @@ const NotasRoute = NotasRouteImport.update({
 const MaquinarioRoute = MaquinarioRouteImport.update({
   id: '/maquinario',
   path: '/maquinario',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InsumosRoute = InsumosRouteImport.update({
@@ -79,6 +85,7 @@ export interface FileRoutesByFullPath {
   '/equipe': typeof EquipeRoute
   '/financiamentos': typeof FinanciamentosRoute
   '/insumos': typeof InsumosRoute
+  '/login': typeof LoginRoute
   '/maquinario': typeof MaquinarioRoute
   '/notas': typeof NotasRoute
   '/talhoes': typeof TalhoesRoute
@@ -91,6 +98,7 @@ export interface FileRoutesByTo {
   '/equipe': typeof EquipeRoute
   '/financiamentos': typeof FinanciamentosRoute
   '/insumos': typeof InsumosRoute
+  '/login': typeof LoginRoute
   '/maquinario': typeof MaquinarioRoute
   '/notas': typeof NotasRoute
   '/talhoes': typeof TalhoesRoute
@@ -104,6 +112,7 @@ export interface FileRoutesById {
   '/equipe': typeof EquipeRoute
   '/financiamentos': typeof FinanciamentosRoute
   '/insumos': typeof InsumosRoute
+  '/login': typeof LoginRoute
   '/maquinario': typeof MaquinarioRoute
   '/notas': typeof NotasRoute
   '/talhoes': typeof TalhoesRoute
@@ -118,6 +127,7 @@ export interface FileRouteTypes {
     | '/equipe'
     | '/financiamentos'
     | '/insumos'
+    | '/login'
     | '/maquinario'
     | '/notas'
     | '/talhoes'
@@ -130,6 +140,7 @@ export interface FileRouteTypes {
     | '/equipe'
     | '/financiamentos'
     | '/insumos'
+    | '/login'
     | '/maquinario'
     | '/notas'
     | '/talhoes'
@@ -142,6 +153,7 @@ export interface FileRouteTypes {
     | '/equipe'
     | '/financiamentos'
     | '/insumos'
+    | '/login'
     | '/maquinario'
     | '/notas'
     | '/talhoes'
@@ -155,6 +167,7 @@ export interface RootRouteChildren {
   EquipeRoute: typeof EquipeRoute
   FinanciamentosRoute: typeof FinanciamentosRoute
   InsumosRoute: typeof InsumosRoute
+  LoginRoute: typeof LoginRoute
   MaquinarioRoute: typeof MaquinarioRoute
   NotasRoute: typeof NotasRoute
   TalhoesRoute: typeof TalhoesRoute
@@ -181,6 +194,13 @@ declare module '@tanstack/react-router' {
       path: '/maquinario'
       fullPath: '/maquinario'
       preLoaderRoute: typeof MaquinarioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/insumos': {
@@ -243,6 +263,7 @@ const rootRouteChildren: RootRouteChildren = {
   EquipeRoute: EquipeRoute,
   FinanciamentosRoute: FinanciamentosRoute,
   InsumosRoute: InsumosRoute,
+  LoginRoute: LoginRoute,
   MaquinarioRoute: MaquinarioRoute,
   NotasRoute: NotasRoute,
   TalhoesRoute: TalhoesRoute,
