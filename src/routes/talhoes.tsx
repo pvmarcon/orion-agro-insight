@@ -225,17 +225,25 @@ function TalhoesPage() {
       <div className="grid grid-cols-[420px_1fr] gap-5">
         {/* LEFT — upload + mode */}
         <Panel className="p-5">
-          <h3 className="text-[13px] font-semibold text-white">Upload de arquivo CSV ou KML</h3>
-          <p className="mt-1 text-[11.5px] text-muted-foreground">Arquivos exportados pela sua máquina ou software.</p>
+          <h3 className="text-[13px] font-semibold text-white">Upload de arquivo ou imagem</h3>
+          <p className="mt-1 text-[11.5px] text-muted-foreground">CSV, KML ou imagem (JPG/PNG) da sua área.</p>
 
           <div className="mt-4 rounded-xl border border-dashed border-border bg-panel-2 p-5 text-center">
             <Upload size={28} className="mx-auto text-muted-foreground" />
             <p className="mt-2 text-[12px] text-muted-foreground">
               {fileName ? <span className="text-foreground">{fileName}</span> : "Arraste o arquivo ou selecione manualmente"}
             </p>
-            <input ref={fileRef} type="file" accept=".kml,.csv" hidden onChange={onFile} />
-            <BrandButton className="mt-3 w-full" onClick={() => fileRef.current?.click()}>Selecionar arquivo</BrandButton>
+            <input ref={fileRef} type="file" accept=".kml,.csv,.jpg,.jpeg,.png,.webp,image/*" hidden onChange={onFile} />
+            <input ref={imageRef} type="file" accept="image/*" hidden onChange={onImage} />
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <BrandButton className="w-full" onClick={() => fileRef.current?.click()}>Selecionar arquivo</BrandButton>
+              <button onClick={() => imageRef.current?.click()}
+                className="rounded-lg border border-border bg-panel px-3 py-2 text-[12.5px] font-medium text-foreground hover:bg-[#2a2a2a]">
+                <span className="inline-flex items-center justify-center gap-1.5"><ImageIcon size={13}/> Imagem</span>
+              </button>
+            </div>
           </div>
+
 
           <div className="mt-6 mb-3 text-center text-[11px] uppercase tracking-wider text-muted-foreground">Demarcação de Contorno</div>
 
