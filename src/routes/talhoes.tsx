@@ -52,7 +52,9 @@ function TalhoesPage() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [bgImage, setBgImage] = useState<string>(satellite);
   const fileRef = useRef<HTMLInputElement>(null);
+  const imageRef = useRef<HTMLInputElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
@@ -125,25 +127,39 @@ function TalhoesPage() {
     const f = e.target.files?.[0];
     if (!f) return;
     setFileName(f.name);
-    const text = await f.text();
     const ext = f.name.split(".").pop()?.toLowerCase();
     try {
-      if (ext === "kml") {
+      if (["jpg","jpeg","png","webp"].includes(ext ?? "")) {
+        const url = URL.createObjectURL(f);
+        setBgImage(url);
+        setToast(`Imagem "${f.name}" carregada como mapa base.`);
+      } else if (ext === "kml") {
+        const text = await f.text();
         const polys = parseKml(text);
         if (polys.length === 0) throw new Error("Nenhum polígono encontrado no KML.");
         setPolygons(polys);
         setToast(`KML importado: ${polys.length} talhão(ões).`);
       } else if (ext === "csv") {
+        const text = await f.text();
         const polys = parseCsv(text);
         if (polys.length === 0) throw new Error("CSV sem coordenadas válidas.");
         setPolygons(polys);
         setToast(`CSV importado: ${polys.length} talhão(ões).`);
       } else {
-        setToast("Formato não suportado. Use .kml ou .csv.");
+        setToast("Formato não suportado. Use .kml, .csv, .jpg ou .png.");
       }
     } catch (err: any) {
       setToast(err.message ?? "Falha ao importar arquivo.");
     }
+    e.target.value = "";
+  };
+
+  const onImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    setBgImage(url);
+    setToast(`Imagem "${f.name}" carregada como mapa base.`);
     e.target.value = "";
   };
 
@@ -172,7 +188,7 @@ function TalhoesPage() {
     const ctx = canvas.getContext("2d")!;
     const img = new Image();
     img.crossOrigin = "anonymous";
-    img.src = satellite;
+    img.src = bgImage;
     await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(); });
     ctx.drawImage(img, 0, 0, VW, VH);
     for (const p of polygons) {
@@ -209,17 +225,25 @@ function TalhoesPage() {
       <div className="grid grid-cols-[420px_1fr] gap-5">
         {/* LEFT — upload + mode */}
         <Panel className="p-5">
-          <h3 className="text-[13px] font-semibold text-white">Upload de arquivo CSV ou KML</h3>
-          <p className="mt-1 text-[11.5px] text-muted-foreground">Arquivos exportados pela sua máquina ou software.</p>
+          <h3 className="text-[13px] font-semibold text-white">Upload de arquivo ou imagem</h3>
+          <p className="mt-1 text-[11.5px] text-muted-foreground">CSV, KML ou imagem (JPG/PNG) da sua área.</p>
 
           <div className="mt-4 rounded-xl border border-dashed border-border bg-panel-2 p-5 text-center">
             <Upload size={28} className="mx-auto text-muted-foreground" />
             <p className="mt-2 text-[12px] text-muted-foreground">
               {fileName ? <span className="text-foreground">{fileName}</span> : "Arraste o arquivo ou selecione manualmente"}
             </p>
-            <input ref={fileRef} type="file" accept=".kml,.csv" hidden onChange={onFile} />
-            <BrandButton className="mt-3 w-full" onClick={() => fileRef.current?.click()}>Selecionar arquivo</BrandButton>
+            <input ref={fileRef} type="file" accept=".kml,.csv,.jpg,.jpeg,.png,.webp,image/*" hidden onChange={onFile} />
+            <input ref={imageRef} type="file" accept="image/*" hidden onChange={onImage} />
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <BrandButton className="w-full" onClick={() => fileRef.current?.click()}>Selecionar arquivo</BrandButton>
+              <button onClick={() => imageRef.current?.click()}
+                className="rounded-lg border border-border bg-panel px-3 py-2 text-[12.5px] font-medium text-foreground hover:bg-[#2a2a2a]">
+                <span className="inline-flex items-center justify-center gap-1.5"><ImageIcon size={13}/> Imagem</span>
+              </button>
+            </div>
           </div>
+
 
           <div className="mt-6 mb-3 text-center text-[11px] uppercase tracking-wider text-muted-foreground">Demarcação de Contorno</div>
 
@@ -289,7 +313,7 @@ function TalhoesPage() {
               onMouseMove={handleSvgMove}
               onMouseLeave={() => setHover(null)}
             >
-              <image href={satellite} x={0} y={0} width={VW} height={VH} preserveAspectRatio="xMidYMid slice" />
+              <image href={bgImage} x={0} y={0} width={VW} height={VH} preserveAspectRatio="xMidYMid slice" />
               <rect x={0} y={0} width={VW} height={VH} fill="rgba(0,0,0,0.25)" />
 
               {polygons.map((p) => {
