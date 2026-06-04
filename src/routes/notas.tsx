@@ -1,7 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Search, Download, Plus, FileText } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell, Kpi, Panel, StatusBadge, PageHeader, Tabs, Input, BrandButton } from "@/components/AppShell";
+
+const tabFilter: Record<string, (n: { t: string; s: string }) => boolean> = {
+  Todas: () => true,
+  Entradas: (n) => n.t === "Entrada",
+  Saídas: (n) => n.t === "Saída",
+  Pendentes: (n) => n.s === "Pendente",
+  Rejeitadas: (n) => n.s === "Rejeitada",
+};
+
+const downloadText = (name: string, body: string, mime: string) => {
+  const blob = new Blob([body], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+};
 
 export const Route = createFileRoute("/notas")({
   head: () => ({ meta: [{ title: "Notas Fiscais — Orion AgTech" }] }),
@@ -21,6 +38,14 @@ const notas = [
 
 function NotasPage() {
   const [tab, setTab] = useState("Todas");
+  const [query, setQuery] = useState("");
+  const filtered = notas.filter((n) => (tabFilter[tab]?.(n) ?? true) && (!query || n.n.toLowerCase().includes(query.toLowerCase()) || n.e.toLowerCase().includes(query.toLowerCase())));
+  const exportXml = () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<NFeList>\n${notas.map((n) => `  <NFe numero="${n.n}" emissor="${n.e}" tipo="${n.t}" valor="${n.v}" data="${n.d}" status="${n.s}"/>`).join("\n")}\n</NFeList>`;
+    downloadText("notas-fiscais.xml", xml, "application/xml");
+    toast.success("XML exportado.");
+  };
+  const emit = () => toast.success("Nova NF-e enviada ao SEFAZ.", { description: "Aguardando autorização (Webservice online)." });
   return (
     <AppShell>
       <PageHeader
@@ -28,11 +53,12 @@ function NotasPage() {
         subtitle="Centro de gestão fiscal — Entradas, saídas e SPED"
         actions={
           <>
-            <button className="flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a]"><Download size={14}/> Exportar XML</button>
-            <BrandButton><span className="inline-flex items-center gap-1.5"><Plus size={14}/> Emitir NF-e</span></BrandButton>
+            <button onClick={exportXml} className="flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-2 text-[12.5px] text-foreground hover:bg-[#2a2a2a]"><Download size={14}/> Exportar XML</button>
+            <BrandButton onClick={emit}><span className="inline-flex items-center gap-1.5"><Plus size={14}/> Emitir NF-e</span></BrandButton>
           </>
         }
       />
+
 
       <div className="grid grid-cols-4 gap-4">
         <Kpi label="NF-e este mês" value="42" change="↑ +8 vs anterior" tone="green" />
@@ -47,7 +73,7 @@ function NotasPage() {
             <h2 className="text-[14px] font-semibold text-white">Documentos fiscais</h2>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Buscar por número ou emissor..." className="w-72 pl-8" />
+              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por número ou emissor..." className="w-72 pl-8" />
             </div>
           </div>
 
@@ -67,7 +93,8 @@ function NotasPage() {
               </tr>
             </thead>
             <tbody>
-              {notas.map((n) => (
+              {filtered.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-[12px] text-muted-foreground">Nenhuma nota encontrada.</td></tr>}
+              {filtered.map((n) => (
                 <tr key={n.n} className="border-t border-border">
                   <td className="py-3 font-medium text-brand">{n.n}</td>
                   <td className="text-white">{n.e}</td>
@@ -78,8 +105,8 @@ function NotasPage() {
                   <td><StatusBadge tone={n.st as any}>{n.s}</StatusBadge></td>
                   <td className="text-right">
                     <div className="flex justify-end gap-1.5">
-                      <button className="grid h-7 w-7 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><FileText size={13}/></button>
-                      <button className="grid h-7 w-7 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Download size={13}/></button>
+                      <button onClick={() => toast.message(n.n, { description: `${n.e} · ${n.t} · ${n.v} · ${n.d}` })} className="grid h-7 w-7 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><FileText size={13}/></button>
+                      <button onClick={() => { downloadText(`${n.n.replace(/\s+/g,"_")}.xml`, `<?xml version="1.0"?>\n<NFe numero="${n.n}" emissor="${n.e}" valor="${n.v}"/>`, "application/xml"); toast.success(`${n.n} baixada.`); }} className="grid h-7 w-7 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Download size={13}/></button>
                     </div>
                   </td>
                 </tr>
@@ -87,6 +114,7 @@ function NotasPage() {
             </tbody>
           </table>
         </Panel>
+
 
         <div className="flex flex-col gap-5">
           <Panel className="p-4">

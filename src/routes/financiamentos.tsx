@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Plus, Calendar } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell, Kpi, Panel, StatusBadge, PageHeader, BrandButton } from "@/components/AppShell";
 
 export const Route = createFileRoute("/financiamentos")({
@@ -30,7 +31,7 @@ function FinanciamentosPage() {
       <PageHeader
         title="Financiamentos"
         subtitle="Linhas de crédito rural, CPRs e capital de giro"
-        actions={<BrandButton><span className="inline-flex items-center gap-1.5"><Plus size={14}/> Novo contrato</span></BrandButton>}
+        actions={<BrandButton onClick={() => toast.success("Simulador de novo contrato aberto.")}><span className="inline-flex items-center gap-1.5"><Plus size={14}/> Novo contrato</span></BrandButton>}
       />
 
       <div className="grid grid-cols-4 gap-4">
@@ -59,7 +60,7 @@ function FinanciamentosPage() {
             </thead>
             <tbody>
               {contratos.map((c) => (
-                <tr key={c.id} className="border-t border-border">
+                <tr key={c.id} onClick={() => toast.message(c.id, { description: `${c.b} · Saldo ${c.saldo} · ${c.j} · vence ${c.venc}` })} className="cursor-pointer border-t border-border hover:bg-panel-2">
                   <td className="py-3 text-white">{c.id}</td>
                   <td className="text-muted-foreground">{c.b}</td>
                   <td className="text-muted-foreground">{c.v}</td>
