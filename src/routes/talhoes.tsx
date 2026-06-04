@@ -188,7 +188,7 @@ function TalhoesPage() {
     const ctx = canvas.getContext("2d")!;
     const img = new Image();
     img.crossOrigin = "anonymous";
-    img.src = satellite;
+    img.src = bgImage;
     await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(); });
     ctx.drawImage(img, 0, 0, VW, VH);
     for (const p of polygons) {
