@@ -313,7 +313,7 @@ function TalhoesPage() {
               onMouseMove={handleSvgMove}
               onMouseLeave={() => setHover(null)}
             >
-              <image href={satellite} x={0} y={0} width={VW} height={VH} preserveAspectRatio="xMidYMid slice" />
+              <image href={bgImage} x={0} y={0} width={VW} height={VH} preserveAspectRatio="xMidYMid slice" />
               <rect x={0} y={0} width={VW} height={VH} fill="rgba(0,0,0,0.25)" />
 
               {polygons.map((p) => {
