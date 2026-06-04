@@ -127,25 +127,39 @@ function TalhoesPage() {
     const f = e.target.files?.[0];
     if (!f) return;
     setFileName(f.name);
-    const text = await f.text();
     const ext = f.name.split(".").pop()?.toLowerCase();
     try {
-      if (ext === "kml") {
+      if (["jpg","jpeg","png","webp"].includes(ext ?? "")) {
+        const url = URL.createObjectURL(f);
+        setBgImage(url);
+        setToast(`Imagem "${f.name}" carregada como mapa base.`);
+      } else if (ext === "kml") {
+        const text = await f.text();
         const polys = parseKml(text);
         if (polys.length === 0) throw new Error("Nenhum polígono encontrado no KML.");
         setPolygons(polys);
         setToast(`KML importado: ${polys.length} talhão(ões).`);
       } else if (ext === "csv") {
+        const text = await f.text();
         const polys = parseCsv(text);
         if (polys.length === 0) throw new Error("CSV sem coordenadas válidas.");
         setPolygons(polys);
         setToast(`CSV importado: ${polys.length} talhão(ões).`);
       } else {
-        setToast("Formato não suportado. Use .kml ou .csv.");
+        setToast("Formato não suportado. Use .kml, .csv, .jpg ou .png.");
       }
     } catch (err: any) {
       setToast(err.message ?? "Falha ao importar arquivo.");
     }
+    e.target.value = "";
+  };
+
+  const onImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    setBgImage(url);
+    setToast(`Imagem "${f.name}" carregada como mapa base.`);
     e.target.value = "";
   };
 
