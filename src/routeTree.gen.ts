@@ -9,12 +9,27 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TalhoesRouteImport } from './routes/talhoes'
+import { Route as NotasRouteImport } from './routes/notas'
 import { Route as MaquinarioRouteImport } from './routes/maquinario'
 import { Route as InsumosRouteImport } from './routes/insumos'
+import { Route as FinanciamentosRouteImport } from './routes/financiamentos'
+import { Route as EquipeRouteImport } from './routes/equipe'
 import { Route as EntregasRouteImport } from './routes/entregas'
 import { Route as CulturasRouteImport } from './routes/culturas'
+import { Route as AnalisesRouteImport } from './routes/analises'
 import { Route as IndexRouteImport } from './routes/index'
 
+const TalhoesRoute = TalhoesRouteImport.update({
+  id: '/talhoes',
+  path: '/talhoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotasRoute = NotasRouteImport.update({
+  id: '/notas',
+  path: '/notas',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MaquinarioRoute = MaquinarioRouteImport.update({
   id: '/maquinario',
   path: '/maquinario',
@@ -23,6 +38,16 @@ const MaquinarioRoute = MaquinarioRouteImport.update({
 const InsumosRoute = InsumosRouteImport.update({
   id: '/insumos',
   path: '/insumos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FinanciamentosRoute = FinanciamentosRouteImport.update({
+  id: '/financiamentos',
+  path: '/financiamentos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EquipeRoute = EquipeRouteImport.update({
+  id: '/equipe',
+  path: '/equipe',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EntregasRoute = EntregasRouteImport.update({
@@ -35,6 +60,11 @@ const CulturasRoute = CulturasRouteImport.update({
   path: '/culturas',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AnalisesRoute = AnalisesRouteImport.update({
+  id: '/analises',
+  path: '/analises',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -43,44 +73,109 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/analises': typeof AnalisesRoute
   '/culturas': typeof CulturasRoute
   '/entregas': typeof EntregasRoute
+  '/equipe': typeof EquipeRoute
+  '/financiamentos': typeof FinanciamentosRoute
   '/insumos': typeof InsumosRoute
   '/maquinario': typeof MaquinarioRoute
+  '/notas': typeof NotasRoute
+  '/talhoes': typeof TalhoesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/analises': typeof AnalisesRoute
   '/culturas': typeof CulturasRoute
   '/entregas': typeof EntregasRoute
+  '/equipe': typeof EquipeRoute
+  '/financiamentos': typeof FinanciamentosRoute
   '/insumos': typeof InsumosRoute
   '/maquinario': typeof MaquinarioRoute
+  '/notas': typeof NotasRoute
+  '/talhoes': typeof TalhoesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/analises': typeof AnalisesRoute
   '/culturas': typeof CulturasRoute
   '/entregas': typeof EntregasRoute
+  '/equipe': typeof EquipeRoute
+  '/financiamentos': typeof FinanciamentosRoute
   '/insumos': typeof InsumosRoute
   '/maquinario': typeof MaquinarioRoute
+  '/notas': typeof NotasRoute
+  '/talhoes': typeof TalhoesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/culturas' | '/entregas' | '/insumos' | '/maquinario'
+  fullPaths:
+    | '/'
+    | '/analises'
+    | '/culturas'
+    | '/entregas'
+    | '/equipe'
+    | '/financiamentos'
+    | '/insumos'
+    | '/maquinario'
+    | '/notas'
+    | '/talhoes'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/culturas' | '/entregas' | '/insumos' | '/maquinario'
-  id: '__root__' | '/' | '/culturas' | '/entregas' | '/insumos' | '/maquinario'
+  to:
+    | '/'
+    | '/analises'
+    | '/culturas'
+    | '/entregas'
+    | '/equipe'
+    | '/financiamentos'
+    | '/insumos'
+    | '/maquinario'
+    | '/notas'
+    | '/talhoes'
+  id:
+    | '__root__'
+    | '/'
+    | '/analises'
+    | '/culturas'
+    | '/entregas'
+    | '/equipe'
+    | '/financiamentos'
+    | '/insumos'
+    | '/maquinario'
+    | '/notas'
+    | '/talhoes'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AnalisesRoute: typeof AnalisesRoute
   CulturasRoute: typeof CulturasRoute
   EntregasRoute: typeof EntregasRoute
+  EquipeRoute: typeof EquipeRoute
+  FinanciamentosRoute: typeof FinanciamentosRoute
   InsumosRoute: typeof InsumosRoute
   MaquinarioRoute: typeof MaquinarioRoute
+  NotasRoute: typeof NotasRoute
+  TalhoesRoute: typeof TalhoesRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/talhoes': {
+      id: '/talhoes'
+      path: '/talhoes'
+      fullPath: '/talhoes'
+      preLoaderRoute: typeof TalhoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/notas': {
+      id: '/notas'
+      path: '/notas'
+      fullPath: '/notas'
+      preLoaderRoute: typeof NotasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/maquinario': {
       id: '/maquinario'
       path: '/maquinario'
@@ -93,6 +188,20 @@ declare module '@tanstack/react-router' {
       path: '/insumos'
       fullPath: '/insumos'
       preLoaderRoute: typeof InsumosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/financiamentos': {
+      id: '/financiamentos'
+      path: '/financiamentos'
+      fullPath: '/financiamentos'
+      preLoaderRoute: typeof FinanciamentosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/equipe': {
+      id: '/equipe'
+      path: '/equipe'
+      fullPath: '/equipe'
+      preLoaderRoute: typeof EquipeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/entregas': {
@@ -109,6 +218,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CulturasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/analises': {
+      id: '/analises'
+      path: '/analises'
+      fullPath: '/analises'
+      preLoaderRoute: typeof AnalisesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -121,10 +237,15 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AnalisesRoute: AnalisesRoute,
   CulturasRoute: CulturasRoute,
   EntregasRoute: EntregasRoute,
+  EquipeRoute: EquipeRoute,
+  FinanciamentosRoute: FinanciamentosRoute,
   InsumosRoute: InsumosRoute,
   MaquinarioRoute: MaquinarioRoute,
+  NotasRoute: NotasRoute,
+  TalhoesRoute: TalhoesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
