@@ -190,9 +190,9 @@ function TalhoesPage() {
 
     const refresh = () => {
       const fc = draw.getAll();
-      const next: Plot[] = fc.features
-        .filter((f): f is GeoJSON.Feature<GeoJSON.Polygon> => f.geometry?.type === "Polygon")
-        .map((f, i) => buildPlot(f, i));
+      const next: Plot[] = (fc.features as GeoJSON.Feature[])
+        .filter((f: GeoJSON.Feature): f is GeoJSON.Feature<GeoJSON.Polygon> => f.geometry?.type === "Polygon")
+        .map((f: GeoJSON.Feature<GeoJSON.Polygon>, i: number) => buildPlot(f, i));
       setPlots(next);
     };
     map.on("draw.create", refresh);
