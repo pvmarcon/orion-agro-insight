@@ -1,6 +1,10 @@
-import { Link, useRouterState } from "@tanstack/react-router";
-import { Bell, Settings, Package, Sprout, Tractor, Truck, Users, Map as MapIcon, BarChart3, FileText, Wallet, LayoutGrid } from "lucide-react";
+import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { Bell, Settings, Package, Sprout, Tractor, Truck, Users, Map as MapIcon, BarChart3, FileText, Wallet, LayoutGrid, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
+import { Toaster, toast } from "sonner";
+
+export { toast };
+
 
 const topNav = [
   "Início", "A Orion", "Produtos", "Laboratório", "Cálculo de rentabilidade", "Difusão de conhecimento", "Contato",
@@ -36,7 +40,13 @@ const sideSections = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const activeTop = "Difusão de conhecimento";
+  const logout = () => {
+    try { sessionStorage.removeItem("orion_auth"); } catch {}
+    toast.success("Sessão encerrada.");
+    navigate({ to: "/login" });
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -49,13 +59,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <nav className="hidden items-center gap-5 text-[12.5px] lg:flex">
             {topNav.map((l) => (
-              <a key={l} href="#" className={l === activeTop ? "text-brand" : "text-muted-foreground hover:text-foreground"}>{l}</a>
+              <button key={l} onClick={() => toast.message(l, { description: "Seção em construção." })} className={l === activeTop ? "text-brand" : "text-muted-foreground hover:text-foreground"}>{l}</button>
             ))}
           </nav>
         </div>
         <div className="flex items-center gap-2">
-          <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Bell size={14} /></button>
-          <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Settings size={14} /></button>
+          <button onClick={() => toast.message("Notificações", { description: "Você está em dia — sem alertas críticos." })} className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Bell size={14} /></button>
+          <button onClick={() => toast.message("Configurações", { description: "Painel de preferências em breve." })} className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Settings size={14} /></button>
+          <button onClick={logout} title="Sair" className="grid h-8 w-8 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><LogOut size={14} /></button>
           <div className="grid h-8 w-8 place-items-center rounded-full bg-brand text-[11px] font-semibold text-brand-foreground">JP</div>
         </div>
       </header>
@@ -105,6 +116,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <span>Orion AgTech © 2025 · Sistema de Gestão v2.4.1</span>
         <span>Última sincronização: hoje às 14:32</span>
       </footer>
+      <Toaster theme="dark" position="bottom-right" richColors closeButton />
     </div>
   );
 }
