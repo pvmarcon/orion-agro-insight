@@ -1,7 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Search, Download, Plus, FileText } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell, Kpi, Panel, StatusBadge, PageHeader, Tabs, Input, BrandButton } from "@/components/AppShell";
+
+const tabFilter: Record<string, (n: { t: string; s: string }) => boolean> = {
+  Todas: () => true,
+  Entradas: (n) => n.t === "Entrada",
+  Saídas: (n) => n.t === "Saída",
+  Pendentes: (n) => n.s === "Pendente",
+  Rejeitadas: (n) => n.s === "Rejeitada",
+};
+
+const downloadText = (name: string, body: string, mime: string) => {
+  const blob = new Blob([body], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+};
 
 export const Route = createFileRoute("/notas")({
   head: () => ({ meta: [{ title: "Notas Fiscais — Orion AgTech" }] }),

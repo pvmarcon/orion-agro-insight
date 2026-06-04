@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Wrench, Clock, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell, Kpi, Panel, StatusBadge, Progress, PageHeader } from "@/components/AppShell";
 
 export const Route = createFileRoute("/maquinario")({
@@ -60,7 +61,7 @@ function MaquinarioPage() {
                   <td className="text-muted-foreground">{r.op}</td>
                   <td className="w-36"><Progress value={r.u} tone={r.ut as any} /></td>
                   <td className="text-muted-foreground">{r.r}</td>
-                  <td className="text-right"><button className="rounded-md border border-border bg-panel-2 px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground">Detalhes</button></td>
+                  <td className="text-right"><button onClick={() => toast.message(r.e, { description: `${r.t} · ${r.s} · Operador: ${r.op}` })} className="rounded-md border border-border bg-panel-2 px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground">Detalhes</button></td>
                 </tr>
               ))}
             </tbody>

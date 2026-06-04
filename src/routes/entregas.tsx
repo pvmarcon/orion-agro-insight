@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Eye, Check } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell, Kpi, Panel, StatusBadge, PageHeader, Tabs } from "@/components/AppShell";
 
 export const Route = createFileRoute("/entregas")({
@@ -8,7 +9,7 @@ export const Route = createFileRoute("/entregas")({
   component: EntregasPage,
 });
 
-const rows = [
+const allRows = [
   { id: "ENT-0051", prod: "Ureia 46% N", q: "30 t", f: "FertiNorte S.A.", s: "Confirmada", st: "green", p: "sex. 30/05", l: "Armazém 2" },
   { id: "ENT-0052", prod: "Soja RR Elite", q: "500 sc", f: "AgroSul Sementes", s: "Em trânsito", st: "blue", p: "seg. 02/06", l: "Galpão 1" },
   { id: "ENT-0053", prod: "Glifosato 480", q: "200 L", f: "DefensoAgro", s: "Pendente", st: "yellow", p: "qua. 04/06", l: "Almoxarifado" },
@@ -16,6 +17,14 @@ const rows = [
   { id: "ENT-0055", prod: "MAP 11-52-0", q: "20 t", f: "Mosaic Fertil.", s: "Confirmada", st: "green", p: "qui. 05/06", l: "Armazém 1" },
   { id: "ENT-0056", prod: "Fungicida Opera", q: "100 L", f: "BASF Brasil", s: "Agendada", st: "gray", p: "seg. 09/06", l: "Almoxarifado" },
 ] as const;
+type Row = typeof allRows[number];
+
+const tabFilter: Record<string, (r: Row) => boolean> = {
+  Todas: () => true,
+  Pendentes: (r) => r.s === "Pendente" || r.s === "Agendada",
+  Confirmadas: (r) => r.s === "Confirmada" || r.s === "Em trânsito",
+  Urgentes: (r) => r.s === "Urgente",
+};
 
 const timeline = [
   { d: "27", m: "mai", c: "#ef4444", t: "Diesel S-10", det: "5.000 L · Urgente" },
@@ -27,6 +36,8 @@ const timeline = [
 
 function EntregasPage() {
   const [tab, setTab] = useState("Todas");
+  const [confirmed, setConfirmed] = useState<Set<string>>(new Set());
+  const rows = allRows.filter(tabFilter[tab] ?? (() => true));
   return (
     <AppShell>
       <PageHeader title="Gestão de Entregas" subtitle="Acompanhamento de pedidos e recebimentos" />
@@ -68,8 +79,8 @@ function EntregasPage() {
                   <td className="text-muted-foreground">{r.l}</td>
                   <td>
                     <div className="flex justify-end gap-1.5">
-                      <button className="grid h-7 w-7 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Eye size={13}/></button>
-                      <button className="grid h-7 w-7 place-items-center rounded-md border border-[#4ADE8055] bg-[#4ADE8021] text-[#4ADE80]"><Check size={13}/></button>
+                      <button onClick={() => toast.message(r.id, { description: `${r.prod} · ${r.q} · ${r.f} · ${r.l}` })} className="grid h-7 w-7 place-items-center rounded-md border border-border bg-panel-2 text-muted-foreground hover:text-foreground"><Eye size={13}/></button>
+                      <button onClick={() => { setConfirmed((s) => new Set(s).add(r.id)); toast.success(`Entrega ${r.id} confirmada.`); }} disabled={confirmed.has(r.id)} className="grid h-7 w-7 place-items-center rounded-md border border-[#4ADE8055] bg-[#4ADE8021] text-[#4ADE80] disabled:opacity-40"><Check size={13}/></button>
                     </div>
                   </td>
                 </tr>
