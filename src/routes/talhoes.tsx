@@ -382,15 +382,31 @@ function TalhoesPage() {
     m.triggerRepaint();
   };
 
-  const saveToken = (e: React.FormEvent) => {
+  const saveToken = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tokenInput.trim().startsWith("pk.")) {
-      toast.error("Token inválido. Use um Access Token público (pk.…) do Mapbox.");
+    const t = tokenInput.trim();
+    if (!t.startsWith("pk.")) {
+      toast.error("Token inválido.", { description: "Use um Access Token público (pk.…) do Mapbox." });
       return;
     }
-    try { localStorage.setItem("orion_mapbox_token", tokenInput.trim()); } catch {}
-    setToken(tokenInput.trim());
-    toast.success("Mapbox conectado.");
+    const tid = toast.loading("Validando token Mapbox...");
+    try {
+      const r = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/test.json?limit=1&access_token=${encodeURIComponent(t)}`);
+      if (r.status === 401 || r.status === 403) {
+        toast.error("Token rejeitado pelo Mapbox.", { id: tid, description: "Verifique se é um token público válido com escopo padrão." });
+        return;
+      }
+      if (!r.ok) {
+        toast.error(`Mapbox respondeu ${r.status}.`, { id: tid });
+        return;
+      }
+      try { localStorage.setItem("orion_mapbox_token", t); } catch {}
+      setToken(t);
+      toast.success("Mapbox conectado.", { id: tid });
+    } catch (err: any) {
+      console.error("[mapbox] token validation failed", err);
+      toast.error("Não foi possível validar o token.", { id: tid, description: err?.message ?? "Verifique sua conexão." });
+    }
   };
 
   /* ── Render ── */
