@@ -347,39 +347,43 @@ function TalhoesPage() {
   const totalHa = useMemo(() => plots.reduce((s, p) => s + p.hectares, 0), [plots]);
 
   const startDrawing = () => {
-    const d = drawRef.current; if (!d) return;
-    d.changeMode("draw_polygon" as any);
+    const m = mapRef.current; if (!m) return;
+    drawingRef.current = true;
+    setIsDrawing(true);
+    setDraft([]);
+    m.doubleClickZoom.disable();
+    m.getCanvas().style.cursor = "crosshair";
     toast.message("Demarcação manual ativa", { description: "Clique no mapa para adicionar pontos. Duplo clique para finalizar." });
   };
 
   const undoPoint = () => {
-    // Mapbox Draw does not expose an undo; cancel current draw and let user restart.
-    const d = drawRef.current; if (!d) return;
-    d.changeMode("simple_select");
-    toast.message("Demarcação cancelada.");
+    if (!drawingRef.current) return;
+    const next = draftPointsRef.current.slice(0, -1);
+    setDraft(next);
+    toast.message(next.length ? "Último ponto removido." : "Demarcação cancelada.");
   };
 
   const clearAll = () => {
-    const d = drawRef.current; if (!d) return;
-    if (plots.length === 0) return;
-    d.deleteAll();
+    if (plots.length === 0 && draftPoints.length === 0) return;
+    drawingRef.current = false;
+    setIsDrawing(false);
+    setDraft([]);
     setPlots([]);
+    const map = mapRef.current;
+    if (map) {
+      map.doubleClickZoom.enable();
+      map.getCanvas().style.cursor = "";
+    }
     toast.success("Demarcações apagadas.");
   };
 
   const runAutoDetect = () => {
-    const m = mapRef.current, d = drawRef.current; if (!m || !d) return;
+    const m = mapRef.current; if (!m) return;
     setAutoRunning(true);
     setTimeout(() => {
       const center = m.getCenter().toArray() as [number, number];
       const feats = sampleFeatures(center);
-      d.deleteAll();
-      feats.forEach((f) => d.add(f));
-      const fc = d.getAll();
-      const next = (fc.features as GeoJSON.Feature[]).map((f: GeoJSON.Feature, i: number) => {
-        const merged = { ...f, properties: { ...(f.properties ?? {}), ...feats[i]?.properties } } as GeoJSON.Feature<GeoJSON.Polygon>;
-        return buildPlot(merged, i);
-      });
+      const next = feats.map((f, i) => buildPlot(f, i));
       setPlots(next);
       setAutoRunning(false);
       const b = new mapboxgl.LngLatBounds();
@@ -405,10 +409,8 @@ function TalhoesPage() {
         return;
       }
       if (feats.length === 0) throw new Error("Nenhum polígono encontrado no arquivo.");
-      const d = drawRef.current, m = mapRef.current; if (!d || !m) return;
-      d.deleteAll();
-      feats.forEach((ft, i) => d.add({ ...ft, properties: { ...(ft.properties ?? {}), color: COLORS[i % COLORS.length] } }));
-      const next = (d.getAll().features as GeoJSON.Feature[]).map((ft: GeoJSON.Feature, i: number) => buildPlot({ ...ft, properties: { ...(ft.properties ?? {}), ...feats[i]?.properties } } as GeoJSON.Feature<GeoJSON.Polygon>, i));
+      const m = mapRef.current; if (!m) return;
+      const next = feats.map((ft, i) => buildPlot({ ...ft, properties: { ...(ft.properties ?? {}), color: COLORS[i % COLORS.length] } }, i));
       setPlots(next);
       const b = new mapboxgl.LngLatBounds();
       feats.forEach((ft) => (ft.geometry.coordinates[0] as [number, number][]).forEach((c) => b.extend(c)));
