@@ -613,8 +613,8 @@ function TalhoesPage() {
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Ferramentas do Mapa</div>
             <div className="flex items-center gap-1.5">
               <Tool icon={Pencil} label="Desenhar" brand onClick={startDrawing} disabled={!token} />
-              <Tool icon={Undo2} label="Cancelar desenho" onClick={undoPoint} disabled={!token} />
-              <Tool icon={Trash2} label="Limpar" onClick={clearAll} disabled={plots.length === 0} />
+              <Tool icon={Undo2} label="Remover último ponto" onClick={undoPoint} disabled={!token || !isDrawing || draftPoints.length === 0} />
+              <Tool icon={Trash2} label="Limpar" onClick={clearAll} disabled={plots.length === 0 && draftPoints.length === 0} />
               <Tool icon={ImageIcon} label="Baixar imagem" onClick={exportImage} disabled={!token} />
               <span className="mx-1 h-5 w-px bg-border" />
               <button onClick={() => toast.success("Demarcações salvas no projeto.")} disabled={plots.length === 0}
@@ -694,16 +694,4 @@ function Tool({ icon: Icon, label, brand, disabled, onClick }: { icon: any; labe
       <Icon size={14} />
     </button>
   );
-}
-
-/* ─────────────────────────── Mapbox Draw custom styling ─────────────────────────── */
-function drawStyles() {
-  const brand = "#E6641F";
-  return [
-    { id: "gl-draw-polygon-fill", type: "fill", filter: ["all", ["==", "$type", "Polygon"]], paint: { "fill-color": brand, "fill-opacity": 0.18 } },
-    { id: "gl-draw-polygon-stroke", type: "line", filter: ["all", ["==", "$type", "Polygon"]], paint: { "line-color": brand, "line-width": 2.5 } },
-    { id: "gl-draw-polygon-and-line-vertex-halo-active", type: "circle", filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]], paint: { "circle-radius": 6, "circle-color": "#fff" } },
-    { id: "gl-draw-polygon-and-line-vertex-active", type: "circle", filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]], paint: { "circle-radius": 4, "circle-color": brand } },
-    { id: "gl-draw-line-active", type: "line", filter: ["all", ["==", "$type", "LineString"], ["==", "active", "true"]], paint: { "line-color": brand, "line-dasharray": [0.2, 2], "line-width": 2 } },
-  ] as any[];
 }
