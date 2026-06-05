@@ -6,11 +6,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import mapboxgl from "mapbox-gl";
-import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import turfArea from "@turf/area";
 import turfCentroid from "@turf/centroid";
 import "mapbox-gl/dist/mapbox-gl.css";
-import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 import { AppShell, Panel, PageHeader, BrandButton, Input } from "@/components/AppShell";
 
 export const Route = createFileRoute("/talhoes")({
@@ -37,6 +35,11 @@ const STYLES = {
 type StyleKey = keyof typeof STYLES;
 
 const ENV_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string | undefined) ?? "";
+const PLOTS_SOURCE = "orion-plots-source";
+const PLOTS_FILL = "orion-plots-fill";
+const PLOTS_LINE = "orion-plots-line";
+const DRAFT_SOURCE = "orion-draft-source";
+const DRAFT_LINE = "orion-draft-line";
 
 /* ─────────────────────────── Sample polygons (auto detect) ─────────────────────────── */
 function sampleFeatures(center: [number, number]): GeoJSON.Feature<GeoJSON.Polygon>[] {
