@@ -6,11 +6,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import mapboxgl from "mapbox-gl";
-import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import turfArea from "@turf/area";
 import turfCentroid from "@turf/centroid";
 import "mapbox-gl/dist/mapbox-gl.css";
-import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 import { AppShell, Panel, PageHeader, BrandButton, Input } from "@/components/AppShell";
 
 export const Route = createFileRoute("/talhoes")({
@@ -37,6 +35,11 @@ const STYLES = {
 type StyleKey = keyof typeof STYLES;
 
 const ENV_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string | undefined) ?? "";
+const PLOTS_SOURCE = "orion-plots-source";
+const PLOTS_FILL = "orion-plots-fill";
+const PLOTS_LINE = "orion-plots-line";
+const DRAFT_SOURCE = "orion-draft-source";
+const DRAFT_LINE = "orion-draft-line";
 
 /* ─────────────────────────── Sample polygons (auto detect) ─────────────────────────── */
 function sampleFeatures(center: [number, number]): GeoJSON.Feature<GeoJSON.Polygon>[] {
@@ -138,8 +141,11 @@ function TalhoesPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const drawRef = useRef<MapboxDraw | null>(null);
   const labelMarkers = useRef<mapboxgl.Marker[]>([]);
+  const drawingRef = useRef(false);
+  const draftPointsRef = useRef<[number, number][]>([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [draftPoints, setDraftPoints] = useState<[number, number][]>([]);
 
   /* ── Build a Plot from a raw GeoJSON polygon ── */
   const buildPlot = (feat: GeoJSON.Feature<GeoJSON.Polygon>, idx: number): Plot => {
@@ -155,23 +161,91 @@ function TalhoesPage() {
     };
   };
 
+  const setDraft = (points: [number, number][]) => {
+    draftPointsRef.current = points;
+    setDraftPoints(points);
+  };
+
+  const plotsCollection = (items: Plot[]): GeoJSON.FeatureCollection<GeoJSON.Polygon> => ({
+    type: "FeatureCollection",
+    features: items.map((p) => ({
+      ...p.feature,
+      properties: { ...(p.feature.properties ?? {}), name: p.name, color: p.color, cultura: p.cultura ?? "", hectares: +p.hectares.toFixed(2) },
+    })),
+  });
+
+  const draftCollection = (points: [number, number][]): GeoJSON.FeatureCollection<GeoJSON.LineString> => ({
+    type: "FeatureCollection",
+    features: points.length > 0 ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: points } }] : [],
+  });
+
+  const renderMapData = (map: mapboxgl.Map, currentPlots = plots, currentDraft = draftPoints) => {
+    if (!map.isStyleLoaded()) return;
+    const plotData = plotsCollection(currentPlots);
+    const draftData = draftCollection(currentDraft);
+
+    const plotSource = map.getSource(PLOTS_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+    if (plotSource) plotSource.setData(plotData);
+    else {
+      map.addSource(PLOTS_SOURCE, { type: "geojson", data: plotData });
+      map.addLayer({
+        id: PLOTS_FILL,
+        type: "fill",
+        source: PLOTS_SOURCE,
+        paint: { "fill-color": ["coalesce", ["get", "color"], "#E6641F"], "fill-opacity": 0.24 },
+      });
+      map.addLayer({
+        id: PLOTS_LINE,
+        type: "line",
+        source: PLOTS_SOURCE,
+        paint: { "line-color": ["coalesce", ["get", "color"], "#E6641F"], "line-width": 2.8 },
+      });
+    }
+
+    const draftSource = map.getSource(DRAFT_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+    if (draftSource) draftSource.setData(draftData);
+    else {
+      map.addSource(DRAFT_SOURCE, { type: "geojson", data: draftData });
+      map.addLayer({
+        id: DRAFT_LINE,
+        type: "line",
+        source: DRAFT_SOURCE,
+        paint: { "line-color": "#E6641F", "line-width": 3, "line-dasharray": [1.2, 1.2] },
+      });
+    }
+  };
+
+  const finishDrawing = () => {
+    const points = draftPointsRef.current;
+    if (points.length < 3) {
+      toast.error("Marque pelo menos 3 pontos para fechar o talhão.");
+      return;
+    }
+    const closed = [...points, points[0]];
+    setPlots((prev) => {
+      const idx = prev.length;
+      const feat: GeoJSON.Feature<GeoJSON.Polygon> = {
+        type: "Feature",
+        properties: { name: `Talhão ${String.fromCharCode(65 + idx)}`, color: COLORS[idx % COLORS.length] },
+        geometry: { type: "Polygon", coordinates: [closed] },
+      };
+      return [...prev, buildPlot(feat, idx)];
+    });
+    drawingRef.current = false;
+    setIsDrawing(false);
+    setDraft([]);
+    const map = mapRef.current;
+    if (map) {
+      map.doubleClickZoom.enable();
+      map.getCanvas().style.cursor = "";
+    }
+    toast.success("Talhão demarcado.");
+  };
+
   /* ── Initialize map ── */
   useEffect(() => {
     if (!token || !mapEl.current || mapRef.current) return;
     mapboxgl.accessToken = token;
-
-    // mapbox-gl v3 compat for mapbox-gl-draw v1.5 (defensive)
-    try {
-      const C = (MapboxDraw as any).constants?.classes;
-      if (C) {
-        C.CANVAS = "mapboxgl-canvas";
-        C.CANVAS_CONTAINER = "mapboxgl-canvas-container";
-        C.CONTROL_BASE = "mapboxgl-ctrl";
-        C.CONTROL_PREFIX = "mapboxgl-ctrl-";
-        C.CONTROL_GROUP = "mapboxgl-ctrl-group";
-        C.ATTRIBUTION = "mapboxgl-ctrl-attrib";
-      }
-    } catch {}
 
     let map: mapboxgl.Map;
     try {
@@ -195,34 +269,25 @@ function TalhoesPage() {
     map.addControl(new mapboxgl.ScaleControl({ unit: "metric" }), "bottom-left");
     map.addControl(new mapboxgl.AttributionControl({ compact: true }));
 
-    const refresh = () => {
-      const d = drawRef.current; if (!d) return;
-      const fc = d.getAll();
-      const next: Plot[] = (fc.features as GeoJSON.Feature[])
-        .filter((f: GeoJSON.Feature): f is GeoJSON.Feature<GeoJSON.Polygon> => f.geometry?.type === "Polygon")
-        .map((f: GeoJSON.Feature<GeoJSON.Polygon>, i: number) => buildPlot(f, i));
-      setPlots(next);
-    };
-
     map.on("load", () => {
-      try {
-        const draw = new MapboxDraw({
-          displayControlsDefault: false,
-          controls: { polygon: false, trash: false },
-          defaultMode: "simple_select",
-          styles: drawStyles(),
-        });
-        drawRef.current = draw;
-        map.addControl(draw as any);
-        map.on("draw.create", refresh);
-        map.on("draw.update", refresh);
-        map.on("draw.delete", refresh);
-      } catch (e: any) {
-        console.error("[mapbox-draw] init failed", e);
-        toast.error("Falha ao iniciar ferramenta de desenho.", { description: e?.message ?? "" });
-      }
+      renderMapData(map, [], []);
       setTimeout(() => { try { map.resize(); } catch {} }, 50);
     });
+
+    const onClick = (ev: mapboxgl.MapMouseEvent) => {
+      if (!drawingRef.current) return;
+      const next = [...draftPointsRef.current, ev.lngLat.toArray() as [number, number]];
+      setDraft(next);
+    };
+
+    const onDoubleClick = (ev: mapboxgl.MapMouseEvent) => {
+      if (!drawingRef.current) return;
+      ev.preventDefault();
+      finishDrawing();
+    };
+
+    map.on("click", onClick);
+    map.on("dblclick", onDoubleClick);
 
     map.on("error", (ev: any) => {
       const msg = ev?.error?.message ?? String(ev?.error ?? ev);
@@ -240,11 +305,14 @@ function TalhoesPage() {
 
     return () => {
       window.removeEventListener("resize", onResize);
+      map.off("click", onClick);
+      map.off("dblclick", onDoubleClick);
       labelMarkers.current.forEach((m) => m.remove());
       labelMarkers.current = [];
+      drawingRef.current = false;
+      setDraft([]);
       try { map.remove(); } catch {}
       mapRef.current = null;
-      drawRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -253,7 +321,14 @@ function TalhoesPage() {
   useEffect(() => {
     const m = mapRef.current; if (!m) return;
     m.setStyle(STYLES[styleKey]);
+    m.once("style.load", () => renderMapData(m));
   }, [styleKey]);
+
+  useEffect(() => {
+    const m = mapRef.current; if (!m) return;
+    renderMapData(m);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plots, draftPoints]);
 
   /* ── Render area labels as markers (independent of style reloads) ── */
   useEffect(() => {
@@ -272,39 +347,43 @@ function TalhoesPage() {
   const totalHa = useMemo(() => plots.reduce((s, p) => s + p.hectares, 0), [plots]);
 
   const startDrawing = () => {
-    const d = drawRef.current; if (!d) return;
-    d.changeMode("draw_polygon" as any);
+    const m = mapRef.current; if (!m) return;
+    drawingRef.current = true;
+    setIsDrawing(true);
+    setDraft([]);
+    m.doubleClickZoom.disable();
+    m.getCanvas().style.cursor = "crosshair";
     toast.message("Demarcação manual ativa", { description: "Clique no mapa para adicionar pontos. Duplo clique para finalizar." });
   };
 
   const undoPoint = () => {
-    // Mapbox Draw does not expose an undo; cancel current draw and let user restart.
-    const d = drawRef.current; if (!d) return;
-    d.changeMode("simple_select");
-    toast.message("Demarcação cancelada.");
+    if (!drawingRef.current) return;
+    const next = draftPointsRef.current.slice(0, -1);
+    setDraft(next);
+    toast.message(next.length ? "Último ponto removido." : "Demarcação cancelada.");
   };
 
   const clearAll = () => {
-    const d = drawRef.current; if (!d) return;
-    if (plots.length === 0) return;
-    d.deleteAll();
+    if (plots.length === 0 && draftPoints.length === 0) return;
+    drawingRef.current = false;
+    setIsDrawing(false);
+    setDraft([]);
     setPlots([]);
+    const map = mapRef.current;
+    if (map) {
+      map.doubleClickZoom.enable();
+      map.getCanvas().style.cursor = "";
+    }
     toast.success("Demarcações apagadas.");
   };
 
   const runAutoDetect = () => {
-    const m = mapRef.current, d = drawRef.current; if (!m || !d) return;
+    const m = mapRef.current; if (!m) return;
     setAutoRunning(true);
     setTimeout(() => {
       const center = m.getCenter().toArray() as [number, number];
       const feats = sampleFeatures(center);
-      d.deleteAll();
-      feats.forEach((f) => d.add(f));
-      const fc = d.getAll();
-      const next = (fc.features as GeoJSON.Feature[]).map((f: GeoJSON.Feature, i: number) => {
-        const merged = { ...f, properties: { ...(f.properties ?? {}), ...feats[i]?.properties } } as GeoJSON.Feature<GeoJSON.Polygon>;
-        return buildPlot(merged, i);
-      });
+      const next = feats.map((f, i) => buildPlot(f, i));
       setPlots(next);
       setAutoRunning(false);
       const b = new mapboxgl.LngLatBounds();
@@ -330,10 +409,8 @@ function TalhoesPage() {
         return;
       }
       if (feats.length === 0) throw new Error("Nenhum polígono encontrado no arquivo.");
-      const d = drawRef.current, m = mapRef.current; if (!d || !m) return;
-      d.deleteAll();
-      feats.forEach((ft, i) => d.add({ ...ft, properties: { ...(ft.properties ?? {}), color: COLORS[i % COLORS.length] } }));
-      const next = (d.getAll().features as GeoJSON.Feature[]).map((ft: GeoJSON.Feature, i: number) => buildPlot({ ...ft, properties: { ...(ft.properties ?? {}), ...feats[i]?.properties } } as GeoJSON.Feature<GeoJSON.Polygon>, i));
+      const m = mapRef.current; if (!m) return;
+      const next = feats.map((ft, i) => buildPlot({ ...ft, properties: { ...(ft.properties ?? {}), color: COLORS[i % COLORS.length] } }, i));
       setPlots(next);
       const b = new mapboxgl.LngLatBounds();
       feats.forEach((ft) => (ft.geometry.coordinates[0] as [number, number][]).forEach((c) => b.extend(c)));
@@ -536,8 +613,8 @@ function TalhoesPage() {
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Ferramentas do Mapa</div>
             <div className="flex items-center gap-1.5">
               <Tool icon={Pencil} label="Desenhar" brand onClick={startDrawing} disabled={!token} />
-              <Tool icon={Undo2} label="Cancelar desenho" onClick={undoPoint} disabled={!token} />
-              <Tool icon={Trash2} label="Limpar" onClick={clearAll} disabled={plots.length === 0} />
+              <Tool icon={Undo2} label="Remover último ponto" onClick={undoPoint} disabled={!token || !isDrawing || draftPoints.length === 0} />
+              <Tool icon={Trash2} label="Limpar" onClick={clearAll} disabled={plots.length === 0 && draftPoints.length === 0} />
               <Tool icon={ImageIcon} label="Baixar imagem" onClick={exportImage} disabled={!token} />
               <span className="mx-1 h-5 w-px bg-border" />
               <button onClick={() => toast.success("Demarcações salvas no projeto.")} disabled={plots.length === 0}
@@ -617,16 +694,4 @@ function Tool({ icon: Icon, label, brand, disabled, onClick }: { icon: any; labe
       <Icon size={14} />
     </button>
   );
-}
-
-/* ─────────────────────────── Mapbox Draw custom styling ─────────────────────────── */
-function drawStyles() {
-  const brand = "#E6641F";
-  return [
-    { id: "gl-draw-polygon-fill", type: "fill", filter: ["all", ["==", "$type", "Polygon"]], paint: { "fill-color": brand, "fill-opacity": 0.18 } },
-    { id: "gl-draw-polygon-stroke", type: "line", filter: ["all", ["==", "$type", "Polygon"]], paint: { "line-color": brand, "line-width": 2.5 } },
-    { id: "gl-draw-polygon-and-line-vertex-halo-active", type: "circle", filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]], paint: { "circle-radius": 6, "circle-color": "#fff" } },
-    { id: "gl-draw-polygon-and-line-vertex-active", type: "circle", filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]], paint: { "circle-radius": 4, "circle-color": brand } },
-    { id: "gl-draw-line-active", type: "line", filter: ["all", ["==", "$type", "LineString"], ["==", "active", "true"]], paint: { "line-color": brand, "line-dasharray": [0.2, 2], "line-width": 2 } },
-  ] as any[];
 }
