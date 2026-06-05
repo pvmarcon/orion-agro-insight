@@ -182,6 +182,7 @@ function TalhoesPage() {
         zoom: 13.5,
         pitch: 0,
         attributionControl: false,
+        preserveDrawingBuffer: true,
       });
     } catch (e: any) {
       console.error("[mapbox] init failed", e);
