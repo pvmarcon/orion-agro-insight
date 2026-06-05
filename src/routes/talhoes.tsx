@@ -247,19 +247,6 @@ function TalhoesPage() {
     if (!token || !mapEl.current || mapRef.current) return;
     mapboxgl.accessToken = token;
 
-    // mapbox-gl v3 compat for mapbox-gl-draw v1.5 (defensive)
-    try {
-      const C = (MapboxDraw as any).constants?.classes;
-      if (C) {
-        C.CANVAS = "mapboxgl-canvas";
-        C.CANVAS_CONTAINER = "mapboxgl-canvas-container";
-        C.CONTROL_BASE = "mapboxgl-ctrl";
-        C.CONTROL_PREFIX = "mapboxgl-ctrl-";
-        C.CONTROL_GROUP = "mapboxgl-ctrl-group";
-        C.ATTRIBUTION = "mapboxgl-ctrl-attrib";
-      }
-    } catch {}
-
     let map: mapboxgl.Map;
     try {
       map = new mapboxgl.Map({
@@ -282,34 +269,25 @@ function TalhoesPage() {
     map.addControl(new mapboxgl.ScaleControl({ unit: "metric" }), "bottom-left");
     map.addControl(new mapboxgl.AttributionControl({ compact: true }));
 
-    const refresh = () => {
-      const d = drawRef.current; if (!d) return;
-      const fc = d.getAll();
-      const next: Plot[] = (fc.features as GeoJSON.Feature[])
-        .filter((f: GeoJSON.Feature): f is GeoJSON.Feature<GeoJSON.Polygon> => f.geometry?.type === "Polygon")
-        .map((f: GeoJSON.Feature<GeoJSON.Polygon>, i: number) => buildPlot(f, i));
-      setPlots(next);
-    };
-
     map.on("load", () => {
-      try {
-        const draw = new MapboxDraw({
-          displayControlsDefault: false,
-          controls: { polygon: false, trash: false },
-          defaultMode: "simple_select",
-          styles: drawStyles(),
-        });
-        drawRef.current = draw;
-        map.addControl(draw as any);
-        map.on("draw.create", refresh);
-        map.on("draw.update", refresh);
-        map.on("draw.delete", refresh);
-      } catch (e: any) {
-        console.error("[mapbox-draw] init failed", e);
-        toast.error("Falha ao iniciar ferramenta de desenho.", { description: e?.message ?? "" });
-      }
+      renderMapData(map, [], []);
       setTimeout(() => { try { map.resize(); } catch {} }, 50);
     });
+
+    const onClick = (ev: mapboxgl.MapMouseEvent) => {
+      if (!drawingRef.current) return;
+      const next = [...draftPointsRef.current, ev.lngLat.toArray() as [number, number]];
+      setDraft(next);
+    };
+
+    const onDoubleClick = (ev: mapboxgl.MapMouseEvent) => {
+      if (!drawingRef.current) return;
+      ev.preventDefault();
+      finishDrawing();
+    };
+
+    map.on("click", onClick);
+    map.on("dblclick", onDoubleClick);
 
     map.on("error", (ev: any) => {
       const msg = ev?.error?.message ?? String(ev?.error ?? ev);
@@ -327,11 +305,14 @@ function TalhoesPage() {
 
     return () => {
       window.removeEventListener("resize", onResize);
+      map.off("click", onClick);
+      map.off("dblclick", onDoubleClick);
       labelMarkers.current.forEach((m) => m.remove());
       labelMarkers.current = [];
+      drawingRef.current = false;
+      setDraft([]);
       try { map.remove(); } catch {}
       mapRef.current = null;
-      drawRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -340,7 +321,14 @@ function TalhoesPage() {
   useEffect(() => {
     const m = mapRef.current; if (!m) return;
     m.setStyle(STYLES[styleKey]);
+    m.once("style.load", () => renderMapData(m));
   }, [styleKey]);
+
+  useEffect(() => {
+    const m = mapRef.current; if (!m) return;
+    renderMapData(m);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plots, draftPoints]);
 
   /* ── Render area labels as markers (independent of style reloads) ── */
   useEffect(() => {
