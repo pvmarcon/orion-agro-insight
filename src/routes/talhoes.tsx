@@ -159,6 +159,20 @@ function TalhoesPage() {
   useEffect(() => {
     if (!token || !mapEl.current || mapRef.current) return;
     mapboxgl.accessToken = token;
+
+    // mapbox-gl v3 compat for mapbox-gl-draw v1.5 (defensive)
+    try {
+      const C = (MapboxDraw as any).constants?.classes;
+      if (C) {
+        C.CANVAS = "mapboxgl-canvas";
+        C.CANVAS_CONTAINER = "mapboxgl-canvas-container";
+        C.CONTROL_BASE = "mapboxgl-ctrl";
+        C.CONTROL_PREFIX = "mapboxgl-ctrl-";
+        C.CONTROL_GROUP = "mapboxgl-ctrl-group";
+        C.ATTRIBUTION = "mapboxgl-ctrl-attrib";
+      }
+    } catch {}
+
     let map: mapboxgl.Map;
     try {
       map = new mapboxgl.Map({
@@ -168,8 +182,10 @@ function TalhoesPage() {
         zoom: 13.5,
         pitch: 0,
         attributionControl: false,
+        preserveDrawingBuffer: true,
       });
     } catch (e: any) {
+      console.error("[mapbox] init failed", e);
       toast.error("Falha ao iniciar o Mapbox.", { description: e?.message ?? "" });
       return;
     }
@@ -179,39 +195,54 @@ function TalhoesPage() {
     map.addControl(new mapboxgl.ScaleControl({ unit: "metric" }), "bottom-left");
     map.addControl(new mapboxgl.AttributionControl({ compact: true }));
 
-    const draw = new MapboxDraw({
-      displayControlsDefault: false,
-      controls: { polygon: false, trash: false },
-      defaultMode: "simple_select",
-      styles: drawStyles(),
-    });
-    drawRef.current = draw;
-    map.addControl(draw as any);
-
     const refresh = () => {
-      const fc = draw.getAll();
+      const d = drawRef.current; if (!d) return;
+      const fc = d.getAll();
       const next: Plot[] = (fc.features as GeoJSON.Feature[])
         .filter((f: GeoJSON.Feature): f is GeoJSON.Feature<GeoJSON.Polygon> => f.geometry?.type === "Polygon")
         .map((f: GeoJSON.Feature<GeoJSON.Polygon>, i: number) => buildPlot(f, i));
       setPlots(next);
     };
-    map.on("draw.create", refresh);
-    map.on("draw.update", refresh);
-    map.on("draw.delete", refresh);
+
+    map.on("load", () => {
+      try {
+        const draw = new MapboxDraw({
+          displayControlsDefault: false,
+          controls: { polygon: false, trash: false },
+          defaultMode: "simple_select",
+          styles: drawStyles(),
+        });
+        drawRef.current = draw;
+        map.addControl(draw as any);
+        map.on("draw.create", refresh);
+        map.on("draw.update", refresh);
+        map.on("draw.delete", refresh);
+      } catch (e: any) {
+        console.error("[mapbox-draw] init failed", e);
+        toast.error("Falha ao iniciar ferramenta de desenho.", { description: e?.message ?? "" });
+      }
+      setTimeout(() => { try { map.resize(); } catch {} }, 50);
+    });
 
     map.on("error", (ev: any) => {
-      const m = ev?.error?.message ?? "";
-      if (m.toLowerCase().includes("unauthorized") || m.toLowerCase().includes("invalid")) {
-        toast.error("Token Mapbox inválido.", { description: "Verifique e tente novamente." });
+      const msg = ev?.error?.message ?? String(ev?.error ?? ev);
+      console.error("[mapbox] error", ev?.error ?? ev);
+      const low = msg.toLowerCase();
+      if (low.includes("unauthorized") || low.includes("invalid") || low.includes("403") || low.includes("401")) {
+        toast.error("Token Mapbox inválido ou sem permissão.", { description: "Verifique o token em account.mapbox.com." });
         setToken("");
         try { localStorage.removeItem("orion_mapbox_token"); } catch {}
       }
     });
 
+    const onResize = () => { try { map.resize(); } catch {} };
+    window.addEventListener("resize", onResize);
+
     return () => {
+      window.removeEventListener("resize", onResize);
       labelMarkers.current.forEach((m) => m.remove());
       labelMarkers.current = [];
-      map.remove();
+      try { map.remove(); } catch {}
       mapRef.current = null;
       drawRef.current = null;
     };
@@ -352,15 +383,31 @@ function TalhoesPage() {
     m.triggerRepaint();
   };
 
-  const saveToken = (e: React.FormEvent) => {
+  const saveToken = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tokenInput.trim().startsWith("pk.")) {
-      toast.error("Token inválido. Use um Access Token público (pk.…) do Mapbox.");
+    const t = tokenInput.trim();
+    if (!t.startsWith("pk.")) {
+      toast.error("Token inválido.", { description: "Use um Access Token público (pk.…) do Mapbox." });
       return;
     }
-    try { localStorage.setItem("orion_mapbox_token", tokenInput.trim()); } catch {}
-    setToken(tokenInput.trim());
-    toast.success("Mapbox conectado.");
+    const tid = toast.loading("Validando token Mapbox...");
+    try {
+      const r = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/test.json?limit=1&access_token=${encodeURIComponent(t)}`);
+      if (r.status === 401 || r.status === 403) {
+        toast.error("Token rejeitado pelo Mapbox.", { id: tid, description: "Verifique se é um token público válido com escopo padrão." });
+        return;
+      }
+      if (!r.ok) {
+        toast.error(`Mapbox respondeu ${r.status}.`, { id: tid });
+        return;
+      }
+      try { localStorage.setItem("orion_mapbox_token", t); } catch {}
+      setToken(t);
+      toast.success("Mapbox conectado.", { id: tid });
+    } catch (err: any) {
+      console.error("[mapbox] token validation failed", err);
+      toast.error("Não foi possível validar o token.", { id: tid, description: err?.message ?? "Verifique sua conexão." });
+    }
   };
 
   /* ── Render ── */
