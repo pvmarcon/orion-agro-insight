@@ -141,8 +141,11 @@ function TalhoesPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const drawRef = useRef<MapboxDraw | null>(null);
   const labelMarkers = useRef<mapboxgl.Marker[]>([]);
+  const drawingRef = useRef(false);
+  const draftPointsRef = useRef<[number, number][]>([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [draftPoints, setDraftPoints] = useState<[number, number][]>([]);
 
   /* ── Build a Plot from a raw GeoJSON polygon ── */
   const buildPlot = (feat: GeoJSON.Feature<GeoJSON.Polygon>, idx: number): Plot => {
@@ -156,6 +159,87 @@ function TalhoesPage() {
       hectares: haRaw,
       feature: feat,
     };
+  };
+
+  const setDraft = (points: [number, number][]) => {
+    draftPointsRef.current = points;
+    setDraftPoints(points);
+  };
+
+  const plotsCollection = (items: Plot[]): GeoJSON.FeatureCollection<GeoJSON.Polygon> => ({
+    type: "FeatureCollection",
+    features: items.map((p) => ({
+      ...p.feature,
+      properties: { ...(p.feature.properties ?? {}), name: p.name, color: p.color, cultura: p.cultura ?? "", hectares: +p.hectares.toFixed(2) },
+    })),
+  });
+
+  const draftCollection = (points: [number, number][]): GeoJSON.FeatureCollection<GeoJSON.LineString> => ({
+    type: "FeatureCollection",
+    features: points.length > 0 ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: points } }] : [],
+  });
+
+  const renderMapData = (map: mapboxgl.Map, currentPlots = plots, currentDraft = draftPoints) => {
+    if (!map.isStyleLoaded()) return;
+    const plotData = plotsCollection(currentPlots);
+    const draftData = draftCollection(currentDraft);
+
+    const plotSource = map.getSource(PLOTS_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+    if (plotSource) plotSource.setData(plotData);
+    else {
+      map.addSource(PLOTS_SOURCE, { type: "geojson", data: plotData });
+      map.addLayer({
+        id: PLOTS_FILL,
+        type: "fill",
+        source: PLOTS_SOURCE,
+        paint: { "fill-color": ["coalesce", ["get", "color"], "#E6641F"], "fill-opacity": 0.24 },
+      });
+      map.addLayer({
+        id: PLOTS_LINE,
+        type: "line",
+        source: PLOTS_SOURCE,
+        paint: { "line-color": ["coalesce", ["get", "color"], "#E6641F"], "line-width": 2.8 },
+      });
+    }
+
+    const draftSource = map.getSource(DRAFT_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+    if (draftSource) draftSource.setData(draftData);
+    else {
+      map.addSource(DRAFT_SOURCE, { type: "geojson", data: draftData });
+      map.addLayer({
+        id: DRAFT_LINE,
+        type: "line",
+        source: DRAFT_SOURCE,
+        paint: { "line-color": "#E6641F", "line-width": 3, "line-dasharray": [1.2, 1.2] },
+      });
+    }
+  };
+
+  const finishDrawing = () => {
+    const points = draftPointsRef.current;
+    if (points.length < 3) {
+      toast.error("Marque pelo menos 3 pontos para fechar o talhão.");
+      return;
+    }
+    const closed = [...points, points[0]];
+    setPlots((prev) => {
+      const idx = prev.length;
+      const feat: GeoJSON.Feature<GeoJSON.Polygon> = {
+        type: "Feature",
+        properties: { name: `Talhão ${String.fromCharCode(65 + idx)}`, color: COLORS[idx % COLORS.length] },
+        geometry: { type: "Polygon", coordinates: [closed] },
+      };
+      return [...prev, buildPlot(feat, idx)];
+    });
+    drawingRef.current = false;
+    setIsDrawing(false);
+    setDraft([]);
+    const map = mapRef.current;
+    if (map) {
+      map.doubleClickZoom.enable();
+      map.getCanvas().style.cursor = "";
+    }
+    toast.success("Talhão demarcado.");
   };
 
   /* ── Initialize map ── */
