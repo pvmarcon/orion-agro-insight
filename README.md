@@ -100,7 +100,21 @@ bun run dev
 npm run dev
 ```
 
-O projeto estará disponível em `http://localhost:5173`
+O projeto estará disponível em `http://localhost:8080`
+
+#### 🔌 Porta Customizável
+
+O projeto tenta rodar na **porta 8080** por padrão. Se essa porta estiver ocupada, o Vite automaticamente redireciona para a próxima porta disponível (8081, 8082, etc).
+
+Para especificar uma porta diferente:
+
+```bash
+# Com Bun
+bun run dev -- --port 3000
+
+# Ou com npm
+npm run dev -- --port 3000
+```
 
 ### 5. Build para Produção
 ```bash
@@ -110,6 +124,40 @@ bun run build
 # Ou com npm
 npm run build
 ```
+
+Isso cria uma pasta `/dist` com a aplicação **otimizada e minificada**, pronta para deploy em serviços como Vercel, Netlify ou servidores serverless.
+
+**Arquivo gerado contém:**
+- HTML/CSS/JS minificado
+- Code splitting automático
+- Otimizações de performance
+- Assets comprimidos
+
+**Para fazer deploy:**
+```bash
+# Vercel (recomendado para TanStack Start)
+vercel deploy --prod
+
+# Netlify
+netlify deploy --prod --dir=dist
+
+# Ou seu próprio servidor
+npm install -g http-server
+http-server dist
+```
+
+---
+
+## ⚠️ Aviso Importante
+
+**A autenticação atual é cenográfica/placeholder.** A tela de login aceita qualquer usuário e senha. Para produção, configure:
+
+- Autenticação real via Supabase Auth
+- JWT tokens
+- Validação de credenciais no backend
+- Session management seguro
+
+Consulte a [documentação do Supabase Authentication](https://supabase.com/docs/guides/auth) para implementar segurança adequada.
 
 ---
 
@@ -205,6 +253,6 @@ bun run test:coverage
 
 ## 📞 Suporte
 
-Para dúvidas, abra uma [Issue](https://github.com/pvmarcon/orion-agro-insight/issues) ou entre em contato.
+Para dúvidas, abra uma [Issue](https://github.com/pvmarcon/orion-agro-insight/issues)
 
 ---
